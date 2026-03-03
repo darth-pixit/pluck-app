@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pluck — Select text. It's already copied.</title>
+  <meta name="description" content="Pluck auto-copies any text you select — no keyboard shortcut needed. Free, tiny, open-source for macOS, Windows and Linux.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ─── NAV ─────────────────────────────────────────────────────────────── -->
+<nav class="nav">
+  <span class="nav-brand">pluck</span>
+  <a class="nav-cta" href="#download">Download free</a>
+</nav>
+
+<!-- ─── HERO ─────────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-label">Try it right now ↓</div>
+  <h1 class="hero-headline">
+    Select text.<br>It's already <em>copied</em>.
+  </h1>
+  <p class="hero-sub">
+    No Ctrl+C. No right-click. No nothing.<br>
+    Just select — Pluck does the rest.
+  </p>
+
+  <!-- Interactive demo -->
+  <div class="demo-card" id="demo-card">
+    <div class="demo-card-label">select any text below</div>
+    <p class="demo-text" id="demo-text">
+      The quick brown fox jumps over the lazy dog. Pluck makes copying effortless — 
+      highlight any phrase here and watch what happens.
+    </p>
+    <div class="demo-toast" id="demo-toast">
+      <span class="demo-toast-icon">✦</span>
+      <span id="demo-toast-text"></span>
+    </div>
+  </div>
+
+  <div class="hero-actions">
+    <a class="btn-primary" href="#download">Download for free</a>
+    <a class="btn-ghost" href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener">
+      View source
+    </a>
+  </div>
+</section>
+
+<!-- ─── HOW IT WORKS ─────────────────────────────────────────────────────── -->
+<section class="how" id="how">
+  <h2 class="section-title">How it works</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <div class="step-icon">🖱️</div>
+      <h3>Select</h3>
+      <p>Drag your cursor over any text, or double-click a word. Works in any app.</p>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <div class="step-icon">✦</div>
+      <h3>Plucked</h3>
+      <p>Pluck instantly copies it to your clipboard — before you even lift your finger.</p>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <div class="step-icon">📋</div>
+      <h3>Paste</h3>
+      <p>Just press Ctrl+V (or Cmd+V). Your selection is already there, ready to go.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── HISTORY ───────────────────────────────────────────────────────────── -->
+<section class="history-section">
+  <div class="history-content">
+    <div class="history-text">
+      <span class="pill">New</span>
+      <h2>100 clips. Always within reach.</h2>
+      <p>
+        Every selection is saved — up to 100 entries. Press <kbd>Ctrl+Shift+V</kbd> 
+        (or <kbd>⌘⇧V</kbd> on Mac) to open the history overlay instantly from any app.
+        Search, click, done.
+      </p>
+    </div>
+    <div class="history-mockup">
+      <div class="mockup-panel">
+        <div class="mockup-header">
+          <span class="mockup-brand">pluck</span>
+          <span class="mockup-count">4 / 100</span>
+        </div>
+        <div class="mockup-search">
+          <div class="mockup-search-inner">search history…</div>
+        </div>
+        <ul class="mockup-list">
+          <li class="mockup-item active">
+            <span class="mockup-preview">The quick brown fox jumps over…</span>
+            <span class="mockup-meta">42 chars · just now</span>
+          </li>
+          <li class="mockup-item">
+            <span class="mockup-preview">meeting@company.com</span>
+            <span class="mockup-meta">19 chars · 2m ago</span>
+          </li>
+          <li class="mockup-item">
+            <span class="mockup-preview">npm install --save-dev typescript</span>
+            <span class="mockup-meta">33 chars · 5m ago</span>
+          </li>
+          <li class="mockup-item">
+            <span class="mockup-preview">Ctrl+Shift+V to open history</span>
+            <span class="mockup-meta">28 chars · 8m ago</span>
+          </li>
+        </ul>
+        <div class="mockup-footer">↩ copy · ⌫ delete · esc close</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FEATURES ─────────────────────────────────────────────────────────── -->
+<section class="features">
+  <h2 class="section-title">The clipboard, finally fixed.</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>Zero friction</h3>
+      <p>No modal. No notification. No permission popup. Select text → it's in your clipboard.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🪶</div>
+      <h3>Featherweight</h3>
+      <p>Under 10 MB. Uses virtually no CPU or RAM. Built in Rust with Tauri — not Electron.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>100% local</h3>
+      <p>Everything stays on your machine. No cloud sync, no telemetry, no account required.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌍</div>
+      <h3>All platforms</h3>
+      <p>macOS, Windows, Linux. One codebase, one experience, everywhere you work.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📖</div>
+      <h3>Open source</h3>
+      <p>MIT licensed. Inspect every line, contribute, or fork it. No black boxes.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎛️</div>
+      <h3>Stays out of your way</h3>
+      <p>Lives in your system tray. Enable, disable, or quit from a right-click menu.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── DOWNLOAD ──────────────────────────────────────────────────────────── -->
+<section class="download" id="download">
+  <h2 class="section-title">Download Pluck</h2>
+  <p class="download-sub">Free. Open source. No email required.</p>
+
+  <div class="platform-cards">
+    <div class="platform-card" id="card-mac">
+      <div class="platform-icon">🍎</div>
+      <h3>macOS</h3>
+      <p>11.0 Big Sur or later<br>Apple Silicon + Intel</p>
+      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluck_aarch64.dmg">
+        Download .dmg
+      </a>
+    </div>
+
+    <div class="platform-card" id="card-win">
+      <div class="platform-icon">🪟</div>
+      <h3>Windows</h3>
+      <p>Windows 10 / 11<br>64-bit</p>
+      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluck_x64_en-US.msi">
+        Download .msi
+      </a>
+    </div>
+
+    <div class="platform-card" id="card-linux">
+      <div class="platform-icon">🐧</div>
+      <h3>Linux</h3>
+      <p>Any modern distro<br>AppImage · .deb</p>
+      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluck_amd64.AppImage">
+        Download .AppImage
+      </a>
+    </div>
+  </div>
+
+  <p class="source-note">
+    Or install via 
+    <a href="#">Homebrew</a>, 
+    <a href="#">Chocolatey</a> or 
+    <a href="#">Snap</a> — coming soon.
+    <br>All releases on <a href="https://github.com/darth-pixit/pluck-app/releases" target="_blank" rel="noopener">GitHub →</a>
+  </p>
+</section>
+
+<!-- ─── FOOTER ────────────────────────────────────────────────────────────── -->
+<footer class="footer">
+  <span class="footer-brand">pluck</span>
+  <span class="footer-copy">MIT License · Made with ✦ and Rust</span>
+  <a href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener" class="footer-link">GitHub</a>
+</footer>
+
+<script src="demo.js"></script>
+</body>
+</html>

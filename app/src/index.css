@@ -1,0 +1,205 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:   #FC4C02;
+  --accent-2: #FF6B35;
+  --bg:       rgba(20, 14, 10, 0.97);
+  --surface:  rgba(255, 255, 255, 0.05);
+  --border:   rgba(255, 255, 255, 0.09);
+  --text:     #FFFFFF;
+  --muted:    rgba(255, 255, 255, 0.45);
+  --radius:   14px;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Overlay container (fills the transparent window) ── */
+.overlay {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+/* ── Glass panel ── */
+.panel {
+  width: 420px;
+  max-height: 520px;
+  background: var(--bg);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 0 0 1px rgba(252,76,2,.18),
+    0 20px 60px rgba(0,0,0,.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--accent-2);
+  text-transform: lowercase;
+}
+
+.count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Search ── */
+.search-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 7px 11px;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.search::placeholder { color: var(--muted); }
+.search:focus { border-color: var(--accent); }
+
+/* ── History list ── */
+.history-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background .1s;
+  border: 1px solid transparent;
+}
+
+.history-item:hover,
+.history-item.active {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.history-item.active {
+  border-color: rgba(252,76,2,.35);
+  background: rgba(252,76,2,.08);
+}
+
+.item-preview {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  max-height: 3em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.item-chars { font-variant-numeric: tabular-nums; }
+.item-time  { margin-left: auto; }
+
+.item-delete {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  border-radius: 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity .12s, color .12s;
+}
+
+.history-item:hover .item-delete,
+.history-item.active .item-delete { opacity: 1; }
+.item-delete:hover { color: #F87171; }
+
+/* ── Empty state ── */
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+/* ── Footer ── */
+.panel-footer {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  gap: 8px;
+}
+
+.btn-clear {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+
+.btn-clear:hover { border-color: #F87171; color: #F87171; }
+
+.hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: .02em;
+}

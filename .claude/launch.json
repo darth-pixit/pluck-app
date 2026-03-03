@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Tauri Dev (full app)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "app", "run", "tauri", "--", "dev"],
+      "port": 1420
+    },
+    {
+      "name": "Vite Frontend only",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "app", "run", "dev"],
+      "port": 1420
+    },
+    {
+      "name": "Website preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "3000", "--directory", "website"],
+      "port": 3000
+    }
+  ]
+}

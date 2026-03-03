@@ -1,0 +1,15 @@
+# Rust / Tauri
+app/src-tauri/target/
+app/src-tauri/gen/
+
+# Node
+app/node_modules/
+app/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+*.env.local
