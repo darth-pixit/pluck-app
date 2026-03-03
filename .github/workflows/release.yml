@@ -6,7 +6,42 @@ on:
       - "v*"
 
 jobs:
-  release:
+  # Create the draft release first, then all build jobs upload to it
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `Pluks ${context.ref.replace('refs/tags/', '')}`,
+              body: `## What's new
+            See [CHANGELOG.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CHANGELOG.md) for details.
+
+            ## Installation
+            - **macOS**: Download \`.dmg\`, open it, drag Pluks to Applications. Grant Accessibility + Input Monitoring permissions when prompted.
+            - **Windows**: Run the \`.msi\` installer.
+            - **Linux**: Make the \`.AppImage\` executable (\`chmod +x\`) and run it, or install the \`.deb\`.`,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+          result-encoding: string
+
+  build:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -64,16 +99,5 @@ jobs:
           # Add TAURI_SIGNING_PRIVATE_KEY / APPLE_* secrets for signing
         with:
           projectPath: app
-          tagName: ${{ github.ref_name }}
-          releaseName: "Pluks ${{ github.ref_name }}"
-          releaseBody: |
-            ## What's new
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
-
-            ## Installation
-            - **macOS**: Download `.dmg`, open it, drag Pluks to Applications. Grant Accessibility + Input Monitoring permissions when prompted.
-            - **Windows**: Run the `.msi` installer.
-            - **Linux**: Make the `.AppImage` executable (`chmod +x`) and run it, or install the `.deb`.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
