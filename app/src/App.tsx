@@ -70,7 +70,7 @@ export default function App() {
     <div className="overlay">
       <div className="panel">
         <div className="panel-header">
-          <span className="brand">pluck</span>
+          <span className="brand">pluks</span>
           <span className="count">{items.length} / 100</span>
         </div>
         <div className="search-row">

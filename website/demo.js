@@ -1,6 +1,6 @@
 /**
- * Pluck website interactive demo.
- * When the user selects text in #demo-text, show a "Plucked!" toast
+ * Pluks website interactive demo.
+ * When the user selects text in #demo-text, show a "Snagged!" toast
  * and copy it to clipboard — demonstrating exactly what the app does.
  */
 (function () {
@@ -15,7 +15,7 @@
   function showToast(text) {
     const preview =
       text.length > 30 ? "\u201c" + text.slice(0, 30) + "\u2026\u201d" : "\u201c" + text + "\u201d";
-    toastText.textContent = "Plucked! " + preview;
+    toastText.textContent = "Snagged! " + preview;
     toast.classList.add("show");
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(function () {
@@ -71,8 +71,8 @@
     }
     const card = document.getElementById(cardId);
     if (card) {
-      card.style.borderColor = "rgba(124,58,237,.5)";
-      card.style.boxShadow = "0 0 0 1px rgba(124,58,237,.15), 0 8px 32px rgba(124,58,237,.15)";
+      card.style.borderColor = "rgba(252,76,2,.5)";
+      card.style.boxShadow = "0 0 0 1px rgba(252,76,2,.15), 0 8px 32px rgba(252,76,2,.15)";
       const btn = card.querySelector(".btn-download");
       if (btn) {
         btn.textContent = "\u2193 Download for " + (cardId === "card-mac" ? "macOS" : cardId === "card-win" ? "Windows" : "Linux");

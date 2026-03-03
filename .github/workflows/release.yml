@@ -65,13 +65,13 @@ jobs:
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
-          releaseName: "Pluck ${{ github.ref_name }}"
+          releaseName: "Pluks ${{ github.ref_name }}"
           releaseBody: |
             ## What's new
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
 
             ## Installation
-            - **macOS**: Download `.dmg`, open it, drag Pluck to Applications. Grant Accessibility + Input Monitoring permissions when prompted.
+            - **macOS**: Download `.dmg`, open it, drag Pluks to Applications. Grant Accessibility + Input Monitoring permissions when prompted.
             - **Windows**: Run the `.msi` installer.
             - **Linux**: Make the `.AppImage` executable (`chmod +x`) and run it, or install the `.deb`.
           releaseDraft: true
