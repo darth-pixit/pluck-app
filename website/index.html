@@ -14,6 +14,7 @@
 <!-- ─── NAV ─────────────────────────────────────────────────────────────── -->
 <nav class="nav">
   <span class="nav-brand">pluks</span>
+  <a class="nav-ext" href="#extension">Browser plugin</a>
   <a class="nav-cta" href="#download">Download free</a>
 </nav>
 
@@ -43,8 +44,8 @@
 
   <div class="hero-actions">
     <a class="btn-primary" href="#download">Download for free</a>
-    <a class="btn-ghost" href="#demo-card">
-      Try it now ↓
+    <a class="btn-ghost" href="#extension">
+      Get the browser plugin →
     </a>
   </div>
 </section>
@@ -158,10 +159,82 @@
   </div>
 </section>
 
+<!-- ─── BROWSER EXTENSION ─────────────────────────────────────────────────── -->
+<section class="extension-section" id="extension">
+  <div class="extension-inner">
+    <div class="extension-text">
+      <span class="pill">Browser</span>
+      <h2>Pluks for Chrome &amp; Firefox</h2>
+      <p>
+        Don't want to install the desktop app? The browser extension brings
+        select-to-copy to every tab — with the same ⚡ toast and 100-item history,
+        all stored locally. No signup. No tracking.
+      </p>
+      <div class="extension-buttons">
+        <a class="btn-browser" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/pluks-extension.zip" id="ext-chrome">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-1.57.46-3.03 1.24-4.27L12 15l6.76-7.27A7.95 7.95 0 0 1 20 12c0 4.41-3.59 8-8 8zm0-14c-2.49 0-4.64 1.25-5.93 3.15L12 13l5.93-7.85A6.97 6.97 0 0 0 12 6z"/></svg>
+          Chrome / Edge / Brave
+        </a>
+        <a class="btn-browser btn-browser--ff" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/pluks-extension.zip" id="ext-firefox">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><path fill="#111" d="M8.5 8.5a5 5 0 1 1 7 7 5 5 0 0 1-7-7z"/></svg>
+          Firefox
+        </a>
+      </div>
+      <p class="ext-note">
+        Manual install required — see <a href="#ext-install">instructions below</a>.
+        Chrome Web Store submission in progress.
+      </p>
+    </div>
+    <div class="extension-mockup">
+      <div class="ext-popup">
+        <div class="ext-popup-header">
+          <span style="color:#FC4C02;">⚡</span>
+          <span style="flex:1;font-weight:600;">Pluks History</span>
+          <span style="color:#555;font-size:11px;cursor:pointer;">Clear all</span>
+        </div>
+        <div class="ext-popup-search">search history…</div>
+        <div class="ext-popup-item ext-popup-item--active">
+          <span>The quick brown fox jumps…</span>
+          <span style="color:#555;font-size:10px;">just now</span>
+        </div>
+        <div class="ext-popup-item">
+          <span>meeting@company.com</span>
+          <span style="color:#555;font-size:10px;">2m ago</span>
+        </div>
+        <div class="ext-popup-item">
+          <span>npm install --save-dev vite</span>
+          <span style="color:#555;font-size:10px;">5m ago</span>
+        </div>
+        <div class="ext-popup-item">
+          <span>https://pluks.app</span>
+          <span style="color:#555;font-size:10px;">8m ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Installation instructions -->
+  <div class="ext-install" id="ext-install">
+    <h3>How to install (Chrome / Edge / Brave)</h3>
+    <ol>
+      <li>Download <code>pluks-extension.zip</code> and unzip it.</li>
+      <li>Open <code>chrome://extensions</code> and enable <strong>Developer mode</strong> (top-right toggle).</li>
+      <li>Click <strong>Load unpacked</strong> and select the unzipped folder.</li>
+      <li>The Pluks ⚡ icon appears in your toolbar — done!</li>
+    </ol>
+    <h3 style="margin-top:20px;">Firefox</h3>
+    <ol>
+      <li>Download and unzip <code>pluks-extension.zip</code>.</li>
+      <li>Open <code>about:debugging#/runtime/this-firefox</code>.</li>
+      <li>Click <strong>Load Temporary Add-on</strong> and select <code>manifest.json</code> inside the unzipped folder.</li>
+    </ol>
+  </div>
+</section>
+
 <!-- ─── DOWNLOAD ──────────────────────────────────────────────────────────── -->
 <section class="download" id="download">
-  <h2 class="section-title">Download Pluks</h2>
-  <p class="download-sub">Free. Open source. No email required.</p>
+  <h2 class="section-title">Desktop App</h2>
+  <p class="download-sub">Free. Open source. No email required. Works in every app — not just the browser.</p>
 
   <div class="platform-cards">
     <div class="platform-card" id="card-mac">
