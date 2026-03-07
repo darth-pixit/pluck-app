@@ -4,9 +4,11 @@
 <dict>
   <key>LSUIElement</key>
   <true/>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>Pluks monitors mouse events to detect when you select text, so it can auto-copy your selection.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Pluck uses accessibility to auto-copy selected text.</string>
+  <string>Pluks uses accessibility to simulate copying your selected text.</string>
   <key>NSAccessibilityUsageDescription</key>
-  <string>Pluck uses accessibility to auto-copy selected text.</string>
+  <string>Pluks uses accessibility to simulate copying your selected text.</string>
 </dict>
 </plist>

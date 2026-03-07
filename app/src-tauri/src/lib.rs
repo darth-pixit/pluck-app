@@ -130,12 +130,14 @@ fn start_copy_processor(
             thread::sleep(Duration::from_millis(40));
 
             // Simulate Ctrl/Cmd+C
+            eprintln!("[pluks] simulating copy...");
             simulate_copy();
 
             // Wait for clipboard to update
             thread::sleep(Duration::from_millis(80));
 
             let after = read_clipboard();
+            eprintln!("[pluks] before={:?} after={:?}", before.as_deref().map(|s| &s[..s.len().min(30)]), after.as_deref().map(|s| &s[..s.len().min(30)]));
 
             if let Some(text) = after {
                 // Only save if the clipboard actually changed
