@@ -1,4 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect width="128" height="128" rx="24" fill="#1a1a1a"/>
-  <text x="64" y="90" font-size="80" text-anchor="middle" fill="#FC4C02">⚡</text>
+  <rect width="128" height="128" rx="20" fill="#111111"/>
+  <!-- drop shadow -->
+  <polygon points="28,20 28,96 52,76 67,112 81,106 65,69 94,69"
+           fill="rgba(0,0,0,0.45)" transform="translate(2,2)"/>
+  <!-- orange cursor arrow -->
+  <polygon points="26,18 26,94 50,74 65,110 79,104 63,67 92,67"
+           fill="#FC4C02"/>
 </svg>

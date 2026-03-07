@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=1280"/>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  width: 1280px; height: 800px; overflow: hidden;
+  background: #0C0A08;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex; align-items: center; justify-content: center; gap: 80px;
+  padding: 60px;
+}
+
+/* Left: browser with toast demo */
+.browser-mock {
+  width: 600px; flex-shrink: 0;
+  background: #1a1a1a;
+  border-radius: 14px;
+  box-shadow: 0 40px 100px rgba(0,0,0,0.7);
+  overflow: hidden;
+}
+.browser-bar {
+  background: #2a2a2a;
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.dot { width:12px;height:12px;border-radius:50%; }
+.dot-r{background:#ff5f57;}.dot-y{background:#febc2e;}.dot-g{background:#28c840;}
+.url-bar {
+  flex:1; background:#1e1e1e; border-radius:6px;
+  padding:5px 12px; color:rgba(255,255,255,0.5); font-size:13px;
+}
+.browser-content {
+  padding: 32px 36px; color: #ccc; font-size: 15px; line-height: 1.8;
+}
+.browser-content h3 { color:#fff; font-size:18px; margin-bottom:12px; }
+.highlighted { background:rgba(252,76,2,0.3); color:#FC4C02; padding:0 2px; border-radius:2px; }
+
+.toast {
+  position: relative;
+  margin-top: 20px;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #1a1a1a; border: 1px solid rgba(252,76,2,0.4);
+  padding: 10px 18px; border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  font-size:14px; font-weight:500; color:#fff;
+}
+.toast-icon { color:#FC4C02; font-size:16px; }
+.toast-preview { color:rgba(255,255,255,0.55); font-size:12px; font-weight:400; margin-left:4px; }
+
+/* Right: popup history panel */
+.popup-mock {
+  width: 300px; flex-shrink: 0;
+  background: #111; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7);
+}
+.popup-header {
+  display:flex; align-items:center; gap:8px;
+  padding:13px 14px 11px; border-bottom:1px solid #222;
+  font-size:14px; font-weight:600; color:#fff;
+}
+.popup-search {
+  margin:8px 12px;
+  padding:7px 10px;
+  background:#1e1e1e; border:1px solid #FC4C02;
+  border-radius:6px; font-size:12px; color:#555;
+}
+.popup-item {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:9px 14px; border-bottom:1px solid #181818;
+  font-size:12px; color:#bbb;
+}
+.popup-item:last-child { border-bottom:none; }
+.popup-item.active { background:#1c1c1c; color:#fff; }
+.copy-hint { font-size:10px; color:#FC4C02; margin-left:8px; }
+
+/* Badge labels */
+.label-left, .label-right {
+  position:absolute; bottom:-28px; left:50%; transform:translateX(-50%);
+  font-size:12px; color:rgba(255,255,255,0.4); white-space:nowrap;
+}
+.rel { position:relative; }
+
+/* Headline overlay */
+.headline {
+  position:absolute; top:48px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:14px; white-space:nowrap;
+}
+.headline-icon { font-size:32px; }
+.headline-text { color:#fff; font-size:22px; font-weight:700; }
+.headline-text span { color:#FC4C02; }
+</style>
+</head>
+<body>
+<div class="rel">
+  <div class="browser-mock">
+    <div class="browser-bar">
+      <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+      <div class="url-bar">docs.example.com/getting-started</div>
+    </div>
+    <div class="browser-content">
+      <h3>Getting Started</h3>
+      <p>Before you begin, make sure you have <span class="highlighted">Node.js 18 or later</span> installed.
+      You can verify this by running <code style="background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:4px;font-size:13px;">node --version</code> in your terminal.</p>
+      <br/>
+      <p>Clone the repository and install dependencies:</p>
+      <div style="margin-top:14px;background:#1e1e1e;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:13px;color:#a8ff78;">
+        git clone https://github.com/example/app<br/>
+        cd app &amp;&amp; npm install
+      </div>
+      <div class="toast">
+        <span class="toast-icon">⚡</span>
+        Snagged!
+        <span class="toast-preview">Node.js 18 or later</span>
+      </div>
+    </div>
+  </div>
+  <div style="position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,0.35);white-space:nowrap;">
+    Select text → instantly copied
+  </div>
+</div>
+
+<div class="rel">
+  <div class="popup-mock">
+    <div class="popup-header">
+      <span style="color:#FC4C02;">⚡</span>
+      <span style="flex:1;">Pluks History</span>
+      <span style="color:#555;font-size:11px;">Clear all</span>
+    </div>
+    <div class="popup-search">search history…</div>
+    <div class="popup-item active">
+      <span>Node.js 18 or later</span>
+      <span style="display:flex;align-items:center;">
+        <span style="color:#555;font-size:10px;">just now</span>
+        <span class="copy-hint">Copy</span>
+      </span>
+    </div>
+    <div class="popup-item">
+      <span>git clone https://github…</span>
+      <span style="color:#555;font-size:10px;">1m ago</span>
+    </div>
+    <div class="popup-item">
+      <span>meeting@company.com</span>
+      <span style="color:#555;font-size:10px;">5m ago</span>
+    </div>
+    <div class="popup-item">
+      <span>npm install --save-dev vite</span>
+      <span style="color:#555;font-size:10px;">12m ago</span>
+    </div>
+    <div class="popup-item">
+      <span>https://pluks.app</span>
+      <span style="color:#555;font-size:10px;">1h ago</span>
+    </div>
+  </div>
+  <div style="position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,0.35);white-space:nowrap;">
+    100-item searchable history
+  </div>
+</div>
+</body>
+</html>

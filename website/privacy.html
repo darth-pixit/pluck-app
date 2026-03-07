@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Privacy Policy — Pluks</title>
+  <meta name="description" content="Pluks privacy policy — all data stays on your device.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+    .privacy-wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 80px 24px 120px;
+    }
+    .privacy-wrap h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+    .privacy-wrap .updated { color: rgba(255,255,255,0.4); font-size: 13px; margin-bottom: 48px; }
+    .privacy-wrap h2 { font-size: 1.1rem; font-weight: 600; margin: 36px 0 10px; color: #FC4C02; }
+    .privacy-wrap p, .privacy-wrap li { color: rgba(255,255,255,0.65); line-height: 1.8; font-size: 15px; }
+    .privacy-wrap ul { padding-left: 20px; }
+    .privacy-wrap li { margin-bottom: 6px; }
+    .privacy-wrap a { color: #FC4C02; text-decoration: none; }
+    .privacy-wrap a:hover { text-decoration: underline; }
+    .highlight-box {
+      background: rgba(252,76,2,0.08);
+      border: 1px solid rgba(252,76,2,0.25);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 32px 0;
+      color: rgba(255,255,255,0.8) !important;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="/" style="text-decoration:none;">pluks</a>
+  <a class="nav-cta" href="/#download">Download free</a>
+</nav>
+
+<div class="privacy-wrap">
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: March 2026</p>
+
+  <div class="highlight-box">
+    <strong>Short version:</strong> Pluks collects nothing. All data stays on your device.
+    No servers. No accounts. No telemetry. Nothing leaves your machine.
+  </div>
+
+  <h2>What Pluks collects</h2>
+  <p>Nothing. Pluks does not collect, transmit, or share any personal data, usage data,
+  or any other information about you or your activity.</p>
+
+  <h2>How the desktop app works</h2>
+  <p>The Pluks desktop app monitors mouse activity locally on your device to detect when
+  you select text. When a text selection is detected, it simulates a copy operation and
+  saves the result to a local SQLite database stored in your application data folder.
+  This database never leaves your computer.</p>
+
+  <h2>How the browser extension works</h2>
+  <p>The Pluks browser extension listens for <code>mouseup</code> events in your browser tabs
+  to detect text selections. When a selection is made, it copies the text using the
+  browser's standard Clipboard API and saves an entry to
+  <code>chrome.storage.local</code> (or <code>browser.storage.local</code> on Firefox).
+  This storage is local to your browser and is never synced or transmitted anywhere.</p>
+
+  <h2>Permissions explained</h2>
+  <ul>
+    <li><strong>storage</strong> — used to save your 100-item selection history locally in the browser.</li>
+    <li><strong>clipboardWrite</strong> — used to write selected text to your clipboard.</li>
+    <li><strong>Content script on all URLs</strong> — the extension must run on every page
+    you visit so it can detect text selections. It reads only the text you select;
+    it never reads page content, passwords, form data, or any other information.</li>
+  </ul>
+
+  <h2>Third-party services</h2>
+  <p>Pluks uses no third-party analytics, crash reporting, advertising, or tracking services
+  of any kind, in either the desktop app or the browser extension.</p>
+
+  <h2>Data storage</h2>
+  <p>All data is stored exclusively on your device:</p>
+  <ul>
+    <li>Desktop app: SQLite database in your local application data folder</li>
+    <li>Browser extension: <code>chrome.storage.local</code> / <code>browser.storage.local</code></li>
+  </ul>
+  <p>You can clear all history at any time from within the app or extension.</p>
+
+  <h2>Open source</h2>
+  <p>Pluks is fully open source under the MIT license. You can inspect every line of code at
+  <a href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener">github.com/darth-pixit/pluck-app</a>.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the updated version will be posted at
+  <a href="https://pluks.app/privacy">pluks.app/privacy</a> with a revised date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions? Open an issue at
+  <a href="https://github.com/darth-pixit/pluck-app/issues" target="_blank" rel="noopener">github.com/darth-pixit/pluck-app/issues</a>.</p>
+</div>
+
+<footer class="footer">
+  <span class="footer-brand">pluks</span>
+  <span class="footer-copy">MIT License · Made with ✦ and Rust</span>
+  <a href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener" class="footer-link">GitHub</a>
+</footer>
+</body>
+</html>
