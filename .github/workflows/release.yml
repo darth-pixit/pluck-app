@@ -40,6 +40,34 @@ jobs:
             return data.id;
           result-encoding: string
 
+  upload-extension:
+    needs: create-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package extension zip
+        run: |
+          cd extension
+          zip -r ../pluks-extension.zip manifest.json content.js background.js popup.html popup.js icons/
+
+      - name: Upload extension to release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = fs.readFileSync('pluks-extension.zip');
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              name: 'pluks-extension.zip',
+              data,
+            });
+
   build:
     needs: create-release
     permissions:
