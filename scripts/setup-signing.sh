@@ -7,7 +7,7 @@
 set -euo pipefail
 
 REPO="darth-pixit/pluck-app"
-TEAM_ID="262989ZRP3"
+TEAM_ID="7RC3Q3BU3V"
 APPLE_ID="parth.dixit@alumni.iitd.ac.in"
 
 echo ""
