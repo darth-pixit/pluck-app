@@ -40,7 +40,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "infoPlist": "macos/Info.plist"
+      "infoPlist": "macos/Info.plist",
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
     }
   }
 }
