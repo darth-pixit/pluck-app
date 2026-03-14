@@ -171,6 +171,7 @@ jobs:
 
           for DMG in "$DMG_DIR"/*.dmg; do
             DMG_NAME=$(basename "$DMG")
+
             echo "Notarizing $DMG_NAME..."
             xcrun notarytool submit "$DMG" \
               --apple-id  "$APPLE_ID" \
@@ -181,18 +182,28 @@ jobs:
             echo "Stapling $DMG_NAME..."
             xcrun stapler staple "$DMG"
 
-            # Replace the un-stapled asset already uploaded by tauri-action
-            ASSET_ID=$(gh api \
-              "repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
-              --jq ".[] | select(.name==\"${DMG_NAME}\") | .id")
+            # Delete the un-stapled asset uploaded by tauri-action, then re-upload
+            echo "Replacing release asset $DMG_NAME..."
+            ASSET_ID=$(curl -sS \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
+              | python3 -c "import sys,json; assets=json.load(sys.stdin); \
+                match=[a for a in assets if a['name']=='${DMG_NAME}']; \
+                print(match[0]['id'] if match else '')")
             if [ -n "$ASSET_ID" ]; then
-              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+              curl -sS -X DELETE \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+              echo "Deleted old asset $ASSET_ID"
             fi
-            gh release upload \
-              --repo "${{ github.repository }}" \
-              --clobber \
-              "$(gh api repos/${{ github.repository }}/releases/${RELEASE_ID} --jq '.tag_name')" \
-              "$DMG"
+            curl -f -sS \
+              -X POST \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?name=${DMG_NAME}" \
+              --data-binary "@${DMG}" \
+              | python3 -c "import sys,json; r=json.load(sys.stdin); print(f'Uploaded: {r[\"name\"]} ({r[\"size\"]} bytes)')"
           done
 
   publish-release:
