@@ -156,6 +156,45 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
+      # ── macOS: notarize + staple the DMG, then replace the release asset ─────
+      - name: Notarize and staple DMG
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_ID:       ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:  ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID:     ${{ needs.create-release.outputs.release_id }}
+        run: |
+          TARGET=$(echo "${{ matrix.args }}" | sed 's/--target //')
+          DMG_DIR="app/src-tauri/target/${TARGET}/release/bundle/dmg"
+
+          for DMG in "$DMG_DIR"/*.dmg; do
+            DMG_NAME=$(basename "$DMG")
+            echo "Notarizing $DMG_NAME..."
+            xcrun notarytool submit "$DMG" \
+              --apple-id  "$APPLE_ID" \
+              --password  "$APPLE_PASSWORD" \
+              --team-id   "$APPLE_TEAM_ID" \
+              --wait
+
+            echo "Stapling $DMG_NAME..."
+            xcrun stapler staple "$DMG"
+
+            # Replace the un-stapled asset already uploaded by tauri-action
+            ASSET_ID=$(gh api \
+              "repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name==\"${DMG_NAME}\") | .id")
+            if [ -n "$ASSET_ID" ]; then
+              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+            fi
+            gh release upload \
+              --repo "${{ github.repository }}" \
+              --clobber \
+              "$(gh api repos/${{ github.repository }}/releases/${RELEASE_ID} --jq '.tag_name')" \
+              "$DMG"
+          done
+
   publish-release:
     needs: [create-release, build, upload-extension]
     permissions:
