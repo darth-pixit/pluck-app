@@ -79,6 +79,28 @@ fn get_watcher_status(state: State<Arc<AppState>>) -> bool {
 }
 
 #[tauri::command]
+fn check_accessibility() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" { fn AXIsProcessTrusted() -> bool; }
+        unsafe { AXIsProcessTrusted() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    { true }
+}
+
+#[tauri::command]
+fn open_accessibility_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
+#[tauri::command]
 fn set_watcher_enabled(enabled: bool, state: State<Arc<AppState>>) {
     *state.watcher_enabled.lock().unwrap() = enabled;
 }
@@ -263,6 +285,8 @@ pub fn run() {
             clear_history,
             get_watcher_status,
             set_watcher_enabled,
+            check_accessibility,
+            open_accessibility_settings,
         ])
         .on_window_event(|window, event| {
             // Prevent the history window from fully closing; just hide it

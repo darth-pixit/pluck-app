@@ -81,13 +81,21 @@ impl Database {
             [],
         )?;
 
-        let char_count = content.chars().count();
-        Ok(HistoryItem {
-            id,
-            content: content.to_string(),
-            copied_at: chrono_like_now(),
-            char_count,
-        })
+        // Re-query so copied_at is always the SQLite-generated ISO datetime
+        self.conn.query_row(
+            "SELECT id, content, copied_at FROM history WHERE id = ?1",
+            params![id],
+            |row| {
+                let text: String = row.get(1)?;
+                let len = text.chars().count();
+                Ok(HistoryItem {
+                    id: row.get(0)?,
+                    content: text,
+                    copied_at: row.get(2)?,
+                    char_count: len,
+                })
+            },
+        )
     }
 
     pub fn get_all(&self) -> Result<Vec<HistoryItem>> {
@@ -124,13 +132,3 @@ impl Database {
     }
 }
 
-fn chrono_like_now() -> String {
-    // Simple ISO-like timestamp without pulling in chrono
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // Format as seconds since epoch — frontend will convert
-    secs.to_string()
-}

@@ -15,9 +15,25 @@ export interface HistoryItem {
 export default function App() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [query, setQuery] = useState("");
+  const [accessible, setAccessible] = useState(true);
 
   useEffect(() => {
     invoke<HistoryItem[]>("get_history").then(setItems).catch(console.error);
+    invoke<boolean>("check_accessibility").then(setAccessible).catch(() => setAccessible(true));
+  }, []);
+
+  // Re-check accessibility every time the window is focused (user may have just granted it)
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let cleanup: (() => void) | undefined;
+    win.onFocusChanged(({ payload: focused }) => {
+      if (focused) {
+        invoke<boolean>("check_accessibility").then(setAccessible).catch(() => {});
+      } else {
+        win.hide();
+      }
+    }).then((fn) => (cleanup = fn));
+    return () => cleanup?.();
   }, []);
 
   useEffect(() => {
@@ -36,15 +52,6 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  useEffect(() => {
-    const win = getCurrentWindow();
-    let cleanup: (() => void) | undefined;
-    win.onFocusChanged(({ payload: focused }) => {
-      if (!focused) win.hide();
-    }).then((fn) => (cleanup = fn));
-    return () => cleanup?.();
   }, []);
 
   const handleCopy = useCallback(async (id: number) => {
@@ -67,32 +74,60 @@ export default function App() {
     : items;
 
   return (
-    <div className="overlay">
-      <div className="panel">
-        <div className="panel-header">
-          <span className="brand">pluks</span>
-          <span className="count">{items.length} / 100</span>
-        </div>
-        <div className="search-row">
-          <input
-            autoFocus
-            className="search"
-            placeholder="Search history…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+    <div className="panel">
+      {/* Title bar — draggable, with traffic lights */}
+      <div className="titlebar" data-tauri-drag-region>
+        <div className="traffic-lights">
+          <button
+            className="tl tl-close"
+            title="Close"
+            onClick={() => getCurrentWindow().hide()}
           />
+          <button
+            className="tl tl-min"
+            title="Minimise"
+            onClick={() => getCurrentWindow().minimize()}
+          />
+          {/* green dot intentionally absent — resize has no meaning for this overlay */}
         </div>
-        {filtered.length === 0 ? (
-          <div className="empty">
-            {query ? "No matches" : "Select any text to start collecting"}
-          </div>
-        ) : (
-          <HistoryPanel items={filtered} onCopy={handleCopy} onDelete={handleDelete} />
-        )}
-        <div className="panel-footer">
-          <button className="btn-clear" onClick={handleClear}>Clear all</button>
-          <span className="hint">↩ copy · ⌫ delete · esc close</span>
+        <span className="brand" data-tauri-drag-region>pluks</span>
+        <span className="count">{items.length} / 100</span>
+      </div>
+
+      {/* Accessibility warning banner */}
+      {!accessible && (
+        <div className="access-banner">
+          <span>Accessibility permission needed for auto-copy</span>
+          <button
+            className="access-btn"
+            onClick={() => invoke("open_accessibility_settings")}
+          >
+            Open Settings
+          </button>
         </div>
+      )}
+
+      <div className="search-row">
+        <input
+          autoFocus
+          className="search"
+          placeholder="Search history…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty">
+          {query ? "No matches" : "Select any text to start collecting"}
+        </div>
+      ) : (
+        <HistoryPanel items={filtered} onCopy={handleCopy} onDelete={handleDelete} />
+      )}
+
+      <div className="panel-footer">
+        <button className="btn-clear" onClick={handleClear}>Clear all</button>
+        <span className="hint">↩ copy · ⌫ delete · esc close</span>
       </div>
     </div>
   );

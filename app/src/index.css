@@ -3,7 +3,7 @@
 :root {
   --accent:   #FC4C02;
   --accent-2: #FF6B35;
-  --bg:       rgba(20, 14, 10, 0.97);
+  --bg:       #140E0A;
   --surface:  rgba(255, 255, 255, 0.05);
   --border:   rgba(255, 255, 255, 0.09);
   --text:     #FFFFFF;
@@ -17,50 +17,66 @@ html, body, #root {
   background: transparent;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-/* ── Overlay container (fills the transparent window) ── */
-.overlay {
+/* ── Panel fills the entire window — no transparent gap ── */
+.panel {
   width: 100%;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-}
-
-/* ── Glass panel ── */
-.panel {
-  width: 420px;
-  max-height: 520px;
   background: var(--bg);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow:
     0 0 0 1px rgba(252,76,2,.18),
-    0 20px 60px rgba(0,0,0,.7);
+    0 20px 60px rgba(0,0,0,.8);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* ── Header ── */
-.panel-header {
+/* ── Title bar ── */
+.titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 10px;
+  padding: 10px 14px 8px;
   border-bottom: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
 }
 
+/* macOS traffic lights */
+.traffic-lights {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+}
+
+.tl {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: filter .12s;
+}
+
+.tl-close { background: #FF5F57; }
+.tl-min   { background: #FEBC2E; }
+
+.tl-close:hover { filter: brightness(0.8); }
+.tl-min:hover   { filter: brightness(0.8); }
+
 .brand {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: .06em;
   color: var(--accent-2);
   text-transform: lowercase;
+  flex: 1;
 }
 
 .count {
@@ -68,6 +84,34 @@ html, body, #root {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Accessibility warning ── */
+.access-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(252, 76, 2, 0.12);
+  border-bottom: 1px solid rgba(252, 76, 2, 0.25);
+  font-size: 12px;
+  color: var(--accent-2);
+}
+
+.access-banner span { flex: 1; }
+
+.access-btn {
+  background: rgba(252, 76, 2, 0.2);
+  border: 1px solid rgba(252, 76, 2, 0.4);
+  border-radius: 5px;
+  color: var(--accent-2);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s;
+}
+
+.access-btn:hover { background: rgba(252, 76, 2, 0.35); }
 
 /* ── Search ── */
 .search-row {
@@ -95,7 +139,7 @@ html, body, #root {
   list-style: none;
   overflow-y: auto;
   flex: 1;
-  padding: 6px 6px;
+  padding: 6px;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }

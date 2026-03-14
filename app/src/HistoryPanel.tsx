@@ -7,8 +7,10 @@ interface Props {
   onDelete: (id: number) => void;
 }
 
-function timeAgo(epochSeconds: string): string {
-  const secs = Math.floor(Date.now() / 1000) - parseInt(epochSeconds, 10);
+function timeAgo(ts: string): string {
+  // SQLite stores "YYYY-MM-DD HH:MM:SS" in UTC — append Z so Date parses it as UTC
+  const ms = new Date(ts.includes("T") ? ts : ts + "Z").getTime();
+  const secs = Math.max(0, Math.floor((Date.now() - ms) / 1000));
   if (secs < 60) return "just now";
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
