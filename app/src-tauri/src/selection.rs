@@ -173,5 +173,5 @@ pub fn read_clipboard() -> Option<String> {
         .ok()?
         .get_text()
         .ok()
-        .filter(|s| !s.trim().is_empty())
+        .filter(|s: &String| !s.trim().is_empty())
 }

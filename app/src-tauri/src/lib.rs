@@ -46,7 +46,7 @@ fn copy_item(id: i64, state: State<Arc<AppState>>) -> bool {
     if let Some(t) = text {
         use arboard::Clipboard;
         if let Ok(mut clip) = Clipboard::new() {
-            clip.set_text(&t).is_ok()
+            clip.set_text(t.as_str()).is_ok()
         } else {
             false
         }

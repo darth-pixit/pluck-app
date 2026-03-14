@@ -42,7 +42,7 @@
     "macOS": {
       "infoPlist": "macos/Info.plist",
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "-"
+      "signingIdentity": "Developer ID Application: Parth Dixit (7RC3Q3BU3V)"
     }
   }
 }
