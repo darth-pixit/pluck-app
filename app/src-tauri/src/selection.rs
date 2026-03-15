@@ -35,13 +35,9 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
         loop {
             let tx = tx.clone();
 
-            let mut cur_x: f64 = 0.0;
-            let mut cur_y: f64 = 0.0;
-            let mut press_x: f64 = 0.0;
-            let mut press_y: f64 = 0.0;
+            let mut press_time: Option<Instant> = None;
             let mut last_press = Instant::now();
             let mut click_count: u32 = 0;
-            let mut button_down = false;
 
             eprintln!("[pluks] rdev listener starting...");
 
@@ -49,10 +45,6 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
 
             let result = listen(move |event: Event| {
                 match event.event_type {
-                    EventType::MouseMove { x, y } => {
-                        cur_x = x;
-                        cur_y = y;
-                    }
                     EventType::ButtonPress(Button::Left) => {
                         let now = Instant::now();
                         if now.duration_since(last_press) < Duration::from_millis(500) {
@@ -61,27 +53,23 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
                             click_count = 1;
                         }
                         last_press = now;
-                        press_x = cur_x;
-                        press_y = cur_y;
-                        button_down = true;
-                        eprintln!(
-                            "[pluks] MouseDown at ({:.0},{:.0}) click#{}",
-                            cur_x, cur_y, click_count
-                        );
+                        press_time = Some(now);
+                        eprintln!("[pluks] MouseDown click#{}", click_count);
                     }
                     EventType::ButtonRelease(Button::Left) => {
-                        if !button_down {
-                            return;
-                        }
-                        button_down = false;
-                        let dx = (cur_x - press_x).abs();
-                        let dy = (cur_y - press_y).abs();
-                        let is_drag = dx > 4.0 || dy > 4.0;
+                        let held_ms = press_time
+                            .map(|t| t.elapsed().as_millis())
+                            .unwrap_or(0);
+                        press_time = None;
+
+                        // A drag-select holds the button for >120ms.
+                        // A quick single click is usually <120ms — skip it.
+                        let is_drag = held_ms > 120;
                         let is_multi_click = click_count >= 2;
 
                         eprintln!(
-                            "[pluks] MouseUp dx={:.1} dy={:.1} drag={} multi={} clicks={}",
-                            dx, dy, is_drag, is_multi_click, click_count
+                            "[pluks] MouseUp held={}ms drag={} multi={} clicks={}",
+                            held_ms, is_drag, is_multi_click, click_count
                         );
 
                         if is_drag || is_multi_click {
