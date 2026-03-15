@@ -148,15 +148,15 @@ fn start_copy_processor(
             // Snapshot clipboard before simulating copy
             let before = read_clipboard();
 
-            // Brief delay so the OS can finalise the selection
-            thread::sleep(Duration::from_millis(40));
+            // Give the OS time to finalise the selection before we send Cmd+C
+            thread::sleep(Duration::from_millis(80));
 
-            // Simulate Ctrl/Cmd+C
+            // Simulate Cmd+C
             eprintln!("[pluks] simulating copy...");
             simulate_copy();
 
-            // Wait for clipboard to update
-            thread::sleep(Duration::from_millis(80));
+            // Wait for the target app to write to the clipboard
+            thread::sleep(Duration::from_millis(150));
 
             let after = read_clipboard();
             eprintln!("[pluks] before={:?} after={:?}", before.as_deref().map(|s| &s[..s.len().min(30)]), after.as_deref().map(|s| &s[..s.len().min(30)]));
