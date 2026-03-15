@@ -5,71 +5,108 @@ use std::time::{Duration, Instant};
 /// Sent to the processing thread when a text selection is likely.
 pub struct SelectionSignal;
 
+// ── macOS: check Accessibility permission ─────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn ax_is_trusted() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
 /// Starts the global mouse-event listener in a background thread.
-/// Uses rdev (CGEventTap on macOS, XInput on Linux, hook on Windows).
-/// Requires Accessibility permission on macOS.
+/// On macOS, waits until Accessibility permission is granted before
+/// creating the CGEventTap (and retries automatically if it fails).
 pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
-    use rdev::{listen, Button, Event, EventType};
-
     thread::spawn(move || {
-        eprintln!("[pluks] rdev listener starting...");
+        // ── macOS: poll until Accessibility is granted ────────────────────
+        #[cfg(target_os = "macos")]
+        {
+            while !ax_is_trusted() {
+                eprintln!("[pluks] Waiting for Accessibility permission...");
+                thread::sleep(Duration::from_secs(2));
+            }
+            eprintln!("[pluks] Accessibility permission confirmed.");
+        }
 
-        // These must be captured by the closure but rdev's callback is not FnMut,
-        // so we use Cell/RefCell-equivalent via raw pointers through a Box.
-        let mut cur_x = 0.0f64;
-        let mut cur_y = 0.0f64;
-        let mut press_x = 0.0f64;
-        let mut press_y = 0.0f64;
-        let mut last_press = Instant::now();
-        let mut click_count: u32 = 0;
-        let mut button_down = false;
+        // ── Retry loop — recreate CGEventTap if rdev fails ────────────────
+        loop {
+            let tx = tx.clone();
 
-        if let Err(e) = listen(move |event: Event| {
-            match event.event_type {
-                EventType::MouseMove { x, y } => {
-                    cur_x = x;
-                    cur_y = y;
-                }
-                EventType::ButtonPress(Button::Left) => {
-                    let now = Instant::now();
-                    if now.duration_since(last_press) < Duration::from_millis(500) {
-                        click_count += 1;
-                    } else {
-                        click_count = 1;
+            let mut cur_x: f64 = 0.0;
+            let mut cur_y: f64 = 0.0;
+            let mut press_x: f64 = 0.0;
+            let mut press_y: f64 = 0.0;
+            let mut last_press = Instant::now();
+            let mut click_count: u32 = 0;
+            let mut button_down = false;
+
+            eprintln!("[pluks] rdev listener starting...");
+
+            use rdev::{listen, Button, Event, EventType};
+
+            let result = listen(move |event: Event| {
+                match event.event_type {
+                    EventType::MouseMove { x, y } => {
+                        cur_x = x;
+                        cur_y = y;
                     }
-                    last_press = now;
-                    press_x = cur_x;
-                    press_y = cur_y;
-                    button_down = true;
-                    eprintln!("[pluks] MouseDown at ({:.0},{:.0}) click#{}", cur_x, cur_y, click_count);
-                }
-                EventType::ButtonRelease(Button::Left) => {
-                    if !button_down {
-                        return;
+                    EventType::ButtonPress(Button::Left) => {
+                        let now = Instant::now();
+                        if now.duration_since(last_press) < Duration::from_millis(500) {
+                            click_count += 1;
+                        } else {
+                            click_count = 1;
+                        }
+                        last_press = now;
+                        press_x = cur_x;
+                        press_y = cur_y;
+                        button_down = true;
+                        eprintln!(
+                            "[pluks] MouseDown at ({:.0},{:.0}) click#{}",
+                            cur_x, cur_y, click_count
+                        );
                     }
-                    button_down = false;
-                    let dx = (cur_x - press_x).abs();
-                    let dy = (cur_y - press_y).abs();
-                    let is_drag = dx > 4.0 || dy > 4.0;
-                    let is_multi_click = click_count >= 2;
+                    EventType::ButtonRelease(Button::Left) => {
+                        if !button_down {
+                            return;
+                        }
+                        button_down = false;
+                        let dx = (cur_x - press_x).abs();
+                        let dy = (cur_y - press_y).abs();
+                        let is_drag = dx > 4.0 || dy > 4.0;
+                        let is_multi_click = click_count >= 2;
 
-                    eprintln!(
-                        "[pluks] MouseUp dx={:.1} dy={:.1} drag={} multi={} clicks={}",
-                        dx, dy, is_drag, is_multi_click, click_count
-                    );
+                        eprintln!(
+                            "[pluks] MouseUp dx={:.1} dy={:.1} drag={} multi={} clicks={}",
+                            dx, dy, is_drag, is_multi_click, click_count
+                        );
 
-                    if is_drag || is_multi_click {
-                        eprintln!("[pluks] SelectionSignal sent!");
-                        let _ = tx.send(SelectionSignal);
-                        if is_multi_click {
-                            click_count = 0;
+                        if is_drag || is_multi_click {
+                            eprintln!("[pluks] SelectionSignal sent!");
+                            let _ = tx.send(SelectionSignal);
+                            if is_multi_click {
+                                click_count = 0;
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
+            });
+
+            match result {
+                Ok(_) => {
+                    eprintln!("[pluks] rdev listener exited (unexpected), retrying in 2s...");
+                }
+                Err(e) => {
+                    eprintln!("[pluks] rdev listener error: {:?}, retrying in 3s...", e);
+                    thread::sleep(Duration::from_secs(3));
+                }
             }
-        }) {
-            eprintln!("[pluks] rdev listener error: {:?}", e);
+
+            thread::sleep(Duration::from_secs(1));
         }
     });
 }

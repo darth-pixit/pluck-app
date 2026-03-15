@@ -54,6 +54,10 @@ html, body, #root {
   margin-right: 10px;
 }
 
+.traffic-lights {
+  -webkit-app-region: no-drag;
+}
+
 .tl {
   width: 12px;
   height: 12px;
@@ -62,6 +66,7 @@ html, body, #root {
   cursor: pointer;
   padding: 0;
   transition: filter .12s;
+  -webkit-app-region: no-drag;
 }
 
 .tl-close { background: #FF5F57; }
