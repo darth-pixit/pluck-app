@@ -212,6 +212,118 @@ html, body, #root {
 .history-item.active .item-delete { opacity: 1; }
 .item-delete:hover { color: #F87171; }
 
+/* ── Setup / onboarding screen ── */
+.setup-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 22px 24px;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.setup-logo {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: var(--accent-2);
+  text-transform: lowercase;
+}
+
+.setup-intro {
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.setup-steps {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color .2s, background .2s;
+}
+
+.setup-step.done {
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.07);
+}
+
+.step-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.08);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.setup-step.done .step-icon {
+  background: rgba(52, 211, 153, 0.18);
+  color: #34D399;
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+.step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.step-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.step-btn {
+  background: rgba(252, 76, 2, 0.18);
+  border: 1px solid rgba(252, 76, 2, 0.4);
+  border-radius: 7px;
+  color: var(--accent-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background .12s;
+}
+
+.step-btn:hover { background: rgba(252, 76, 2, 0.32); }
+
+.setup-hint {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+
 /* ── Empty state ── */
 .empty {
   flex: 1;

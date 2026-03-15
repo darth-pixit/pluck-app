@@ -91,11 +91,35 @@ fn check_accessibility() -> bool {
 }
 
 #[tauri::command]
+fn check_input_monitoring() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // IOHIDCheckAccess(kIOHIDRequestTypeListenForNewDevices=1)
+        // returns kIOHIDAccessTypeGranted=0 when permission is granted.
+        #[link(name = "IOKit", kind = "framework")]
+        extern "C" { fn IOHIDCheckAccess(request_type: u32) -> i32; }
+        unsafe { IOHIDCheckAccess(1) == 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    { true }
+}
+
+#[tauri::command]
 fn open_accessibility_settings() {
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
+#[tauri::command]
+fn open_input_monitoring_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
             .spawn();
     }
 }
@@ -194,6 +218,12 @@ pub fn run() {
                 app.set_activation_policy(ActivationPolicy::Accessory);
             }
 
+            // ── Enable login-item autostart (silent, idempotent) ─────────
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let _ = app.autolaunch().enable();
+            }
+
             // ── Initialise database ──────────────────────────────────────
             let db_path = app
                 .path()
@@ -286,7 +316,9 @@ pub fn run() {
             get_watcher_status,
             set_watcher_enabled,
             check_accessibility,
+            check_input_monitoring,
             open_accessibility_settings,
+            open_input_monitoring_settings,
         ])
         .on_window_event(|window, event| {
             // Prevent the history window from fully closing; just hide it

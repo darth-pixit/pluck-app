@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,30 +12,139 @@ export interface HistoryItem {
   char_count: number;
 }
 
+// ── Permission onboarding ──────────────────────────────────────────────────────
+
+function SetupScreen({
+  hasAccessibility,
+  hasInputMonitoring,
+  onCheck,
+}: {
+  hasAccessibility: boolean;
+  hasInputMonitoring: boolean;
+  onCheck: () => void;
+}) {
+  return (
+    <div className="setup-screen">
+      <div className="setup-logo">pluks</div>
+      <p className="setup-intro">
+        Two quick permissions to get you set up — these only need to be done
+        once.
+      </p>
+
+      <div className="setup-steps">
+        {/* Step 1 — Accessibility */}
+        <div className={`setup-step ${hasAccessibility ? "done" : "pending"}`}>
+          <div className="step-icon">{hasAccessibility ? "✓" : "1"}</div>
+          <div className="step-body">
+            <div className="step-title">Accessibility</div>
+            <div className="step-desc">
+              Lets Pluks simulate Cmd+C to copy your selection.
+            </div>
+          </div>
+          {!hasAccessibility && (
+            <button
+              className="step-btn"
+              onClick={() => {
+                invoke("open_accessibility_settings");
+                setTimeout(onCheck, 3000);
+              }}
+            >
+              Grant →
+            </button>
+          )}
+        </div>
+
+        {/* Step 2 — Input Monitoring */}
+        <div
+          className={`setup-step ${hasInputMonitoring ? "done" : "pending"}`}
+        >
+          <div className="step-icon">{hasInputMonitoring ? "✓" : "2"}</div>
+          <div className="step-body">
+            <div className="step-title">Input Monitoring</div>
+            <div className="step-desc">
+              Lets Pluks detect when you select text with your mouse.
+            </div>
+          </div>
+          {!hasInputMonitoring && (
+            <button
+              className="step-btn"
+              onClick={() => {
+                invoke("open_input_monitoring_settings");
+                setTimeout(onCheck, 3000);
+              }}
+            >
+              Grant →
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p className="setup-hint">
+        After granting each permission, come back here — this screen updates
+        automatically.
+      </p>
+    </div>
+  );
+}
+
+// ── Main app ───────────────────────────────────────────────────────────────────
+
 export default function App() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [query, setQuery] = useState("");
-  const [accessible, setAccessible] = useState(true);
+  const [hasAccessibility, setHasAccessibility] = useState(true);
+  const [hasInputMonitoring, setHasInputMonitoring] = useState(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    invoke<HistoryItem[]>("get_history").then(setItems).catch(console.error);
-    invoke<boolean>("check_accessibility").then(setAccessible).catch(() => setAccessible(true));
+  const checkPermissions = useCallback(() => {
+    invoke<boolean>("check_accessibility")
+      .then(setHasAccessibility)
+      .catch(() => setHasAccessibility(true));
+    invoke<boolean>("check_input_monitoring")
+      .then(setHasInputMonitoring)
+      .catch(() => setHasInputMonitoring(true));
   }, []);
 
-  // Re-check accessibility every time the window is focused (user may have just granted it)
+  const needsSetup = !hasAccessibility || !hasInputMonitoring;
+
+  // Initial load
+  useEffect(() => {
+    invoke<HistoryItem[]>("get_history").then(setItems).catch(console.error);
+    checkPermissions();
+  }, [checkPermissions]);
+
+  // Poll every 2 s while setup screen is showing
+  useEffect(() => {
+    if (needsSetup) {
+      pollRef.current = setInterval(checkPermissions, 2000);
+    } else {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [needsSetup, checkPermissions]);
+
+  // Re-check when window gains focus (user may have just granted a permission)
   useEffect(() => {
     const win = getCurrentWindow();
     let cleanup: (() => void) | undefined;
-    win.onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        invoke<boolean>("check_accessibility").then(setAccessible).catch(() => {});
-      } else {
-        win.hide();
-      }
-    }).then((fn) => (cleanup = fn));
+    win
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) {
+          checkPermissions();
+        } else {
+          win.hide();
+        }
+      })
+      .then((fn) => (cleanup = fn));
     return () => cleanup?.();
-  }, []);
+  }, [checkPermissions]);
 
+  // Listen for new selections
   useEffect(() => {
     const unlisten = listen<HistoryItem>("new-selection", (event) => {
       setItems((prev) => {
@@ -43,9 +152,12 @@ export default function App() {
         return [event.payload, ...prev].slice(0, 100);
       });
     });
-    return () => { unlisten.then((fn) => fn()); };
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
+  // Escape closes the panel
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") getCurrentWindow().hide();
@@ -70,12 +182,40 @@ export default function App() {
   }, []);
 
   const filtered = query.trim()
-    ? items.filter((i) => i.content.toLowerCase().includes(query.toLowerCase()))
+    ? items.filter((i) =>
+        i.content.toLowerCase().includes(query.toLowerCase())
+      )
     : items;
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  if (needsSetup) {
+    return (
+      <div className="panel">
+        <div className="titlebar" data-tauri-drag-region>
+          <div className="traffic-lights">
+            <button
+              className="tl tl-close"
+              title="Close"
+              onClick={() => getCurrentWindow().hide()}
+            />
+          </div>
+          <span className="brand" data-tauri-drag-region>
+            pluks
+          </span>
+        </div>
+        <SetupScreen
+          hasAccessibility={hasAccessibility}
+          hasInputMonitoring={hasInputMonitoring}
+          onCheck={checkPermissions}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="panel">
-      {/* Title bar — draggable, with traffic lights */}
+      {/* Title bar */}
       <div className="titlebar" data-tauri-drag-region>
         <div className="traffic-lights">
           <button
@@ -88,24 +228,12 @@ export default function App() {
             title="Minimise"
             onClick={() => getCurrentWindow().minimize()}
           />
-          {/* green dot intentionally absent — resize has no meaning for this overlay */}
         </div>
-        <span className="brand" data-tauri-drag-region>pluks</span>
+        <span className="brand" data-tauri-drag-region>
+          pluks
+        </span>
         <span className="count">{items.length} / 100</span>
       </div>
-
-      {/* Accessibility warning banner */}
-      {!accessible && (
-        <div className="access-banner">
-          <span>Accessibility permission needed for auto-copy</span>
-          <button
-            className="access-btn"
-            onClick={() => invoke("open_accessibility_settings")}
-          >
-            Open Settings
-          </button>
-        </div>
-      )}
 
       <div className="search-row">
         <input
@@ -122,11 +250,17 @@ export default function App() {
           {query ? "No matches" : "Select any text to start collecting"}
         </div>
       ) : (
-        <HistoryPanel items={filtered} onCopy={handleCopy} onDelete={handleDelete} />
+        <HistoryPanel
+          items={filtered}
+          onCopy={handleCopy}
+          onDelete={handleDelete}
+        />
       )}
 
       <div className="panel-footer">
-        <button className="btn-clear" onClick={handleClear}>Clear all</button>
+        <button className="btn-clear" onClick={handleClear}>
+          Clear all
+        </button>
         <span className="hint">↩ copy · ⌫ delete · esc close</span>
       </div>
     </div>

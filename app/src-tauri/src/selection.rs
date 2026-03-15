@@ -5,15 +5,22 @@ use std::time::{Duration, Instant};
 /// Sent to the processing thread when a text selection is likely.
 pub struct SelectionSignal;
 
-// ── macOS: check Accessibility permission ─────────────────────────────────────
+// ── macOS: permission checks ───────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
 fn ax_is_trusted() -> bool {
     #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
+    extern "C" { fn AXIsProcessTrusted() -> bool; }
     unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(target_os = "macos")]
+fn input_monitoring_granted() -> bool {
+    // IOHIDCheckAccess(kIOHIDRequestTypeListenForNewDevices=1)
+    // returns kIOHIDAccessTypeGranted=0 when permission is granted.
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" { fn IOHIDCheckAccess(request_type: u32) -> i32; }
+    unsafe { IOHIDCheckAccess(1) == 0 }
 }
 
 /// Starts the global mouse-event listener in a background thread.
@@ -21,14 +28,18 @@ fn ax_is_trusted() -> bool {
 /// creating the CGEventTap (and retries automatically if it fails).
 pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
     thread::spawn(move || {
-        // ── macOS: poll until Accessibility is granted ────────────────────
+        // ── macOS: poll until both permissions are granted ────────────────
         #[cfg(target_os = "macos")]
         {
-            while !ax_is_trusted() {
-                eprintln!("[pluks] Waiting for Accessibility permission...");
+            loop {
+                let ax = ax_is_trusted();
+                let im = input_monitoring_granted();
+                if ax && im { break; }
+                if !ax { eprintln!("[pluks] Waiting for Accessibility permission..."); }
+                if !im { eprintln!("[pluks] Waiting for Input Monitoring permission..."); }
                 thread::sleep(Duration::from_secs(2));
             }
-            eprintln!("[pluks] Accessibility permission confirmed.");
+            eprintln!("[pluks] Both permissions confirmed — starting listener.");
         }
 
         // ── Retry loop — recreate CGEventTap if rdev fails ────────────────
