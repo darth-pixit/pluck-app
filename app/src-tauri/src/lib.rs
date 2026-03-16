@@ -120,6 +120,20 @@ fn open_accessibility_settings() {
 }
 
 #[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("history") {
+        let _ = win.hide();
+    }
+}
+
+#[tauri::command]
+fn minimize_window(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("history") {
+        let _ = win.minimize();
+    }
+}
+
+#[tauri::command]
 fn open_input_monitoring_settings() {
     #[cfg(target_os = "macos")]
     {
@@ -335,6 +349,8 @@ pub fn run() {
             check_input_monitoring,
             open_accessibility_settings,
             open_input_monitoring_settings,
+            hide_window,
+            minimize_window,
         ])
         .on_window_event(|window, event| {
             // Prevent the history window from fully closing; just hide it

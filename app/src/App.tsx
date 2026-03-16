@@ -5,6 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import HistoryPanel from "./HistoryPanel";
 import "./index.css";
 
+const hideWindow  = () => invoke("hide_window").catch(() => getCurrentWindow().hide());
+const minimizeWindow = () => invoke("minimize_window").catch(() => getCurrentWindow().minimize());
+
 export interface HistoryItem {
   id: number;
   content: string;
@@ -128,7 +131,8 @@ export default function App() {
     };
   }, [needsSetup, checkPermissions]);
 
-  // Re-check when window gains focus (user may have just granted a permission)
+  // Re-check permissions when window gains focus
+  // Hide on blur only if not in setup mode (so user can alt-tab to grant permissions)
   useEffect(() => {
     const win = getCurrentWindow();
     let cleanup: (() => void) | undefined;
@@ -136,13 +140,13 @@ export default function App() {
       .onFocusChanged(({ payload: focused }) => {
         if (focused) {
           checkPermissions();
-        } else {
+        } else if (!needsSetup) {
           win.hide();
         }
       })
       .then((fn) => (cleanup = fn));
     return () => cleanup?.();
-  }, [checkPermissions]);
+  }, [checkPermissions, needsSetup]);
 
   // Listen for new selections
   useEffect(() => {
@@ -168,7 +172,7 @@ export default function App() {
 
   const handleCopy = useCallback(async (id: number) => {
     await invoke("copy_item", { id });
-    getCurrentWindow().hide();
+    hideWindow();
   }, []);
 
   const handleDelete = useCallback(async (id: number) => {
@@ -197,7 +201,8 @@ export default function App() {
             <button
               className="tl tl-close"
               title="Close"
-              onClick={() => getCurrentWindow().hide()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={hideWindow}
             />
           </div>
           <span className="brand" data-tauri-drag-region>
@@ -221,12 +226,14 @@ export default function App() {
           <button
             className="tl tl-close"
             title="Close"
-            onClick={() => getCurrentWindow().hide()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={hideWindow}
           />
           <button
             className="tl tl-min"
             title="Minimise"
-            onClick={() => getCurrentWindow().minimize()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={minimizeWindow}
           />
         </div>
         <span className="brand" data-tauri-drag-region>

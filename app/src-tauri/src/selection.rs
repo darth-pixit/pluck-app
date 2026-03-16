@@ -68,20 +68,21 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
                         let since_last_release = last_release.elapsed().as_millis();
                         last_release = Instant::now();
 
-                        // Drag-select: button held for >200 ms
-                        let is_drag = held_ms > 200;
-                        // Double-click: two quick releases within 500 ms of each other
-                        // (guard: gap must be >50 ms so two events from one physical click don't count)
-                        let is_double_click = !is_drag
-                            && since_last_release < 500
-                            && since_last_release > 50;
+                        // Drag-select: button held for >180 ms
+                        let is_drag = held_ms > 180;
+                        // Multi-click (double or triple): two or more quick releases
+                        // within 600 ms of each other. Gap >30 ms guards against
+                        // spurious duplicate events from a single physical click.
+                        let is_multi_click = !is_drag
+                            && since_last_release < 600
+                            && since_last_release > 30;
 
                         eprintln!(
-                            "[pluks] MouseUp held={}ms gap={}ms drag={} dbl={}",
-                            held_ms, since_last_release, is_drag, is_double_click
+                            "[pluks] MouseUp held={}ms gap={}ms drag={} multi={}",
+                            held_ms, since_last_release, is_drag, is_multi_click
                         );
 
-                        if is_drag || is_double_click {
+                        if is_drag || is_multi_click {
                             eprintln!("[pluks] SelectionSignal sent!");
                             let _ = tx.send(SelectionSignal);
                         }
