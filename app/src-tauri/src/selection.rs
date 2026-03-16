@@ -16,19 +16,45 @@ fn ax_is_trusted() -> bool {
 
 #[cfg(target_os = "macos")]
 fn input_monitoring_granted() -> bool {
-    // IOHIDCheckAccess(kIOHIDRequestTypeListenForNewDevices=1)
-    // returns kIOHIDAccessTypeGranted=0 when permission is granted.
     #[link(name = "IOKit", kind = "framework")]
     extern "C" { fn IOHIDCheckAccess(request_type: u32) -> i32; }
     unsafe { IOHIDCheckAccess(1) == 0 }
 }
 
+// ── macOS: real cursor position via CGEvent ───────────────────────────────────
+// rdev does NOT emit MouseMove for kCGEventLeftMouseDragged, so we can't track
+// drag position through its events. Instead we call CGEventCreate / CGEventGetLocation
+// directly — this always returns the current cursor position regardless of button state.
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPoint { x: f64, y: f64 }
+
+#[cfg(target_os = "macos")]
+fn cursor_pos() -> (f64, f64) {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn CGEventGetLocation(event: *const std::ffi::c_void) -> CGPoint;
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+    unsafe {
+        let ev = CGEventCreate(std::ptr::null());
+        if ev.is_null() { return (0.0, 0.0); }
+        let pt = CGEventGetLocation(ev);
+        CFRelease(ev);
+        (pt.x, pt.y)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cursor_pos() -> (f64, f64) { (0.0, 0.0) }
+
 /// Starts the global mouse-event listener in a background thread.
-/// On macOS, waits until Accessibility permission is granted before
-/// creating the CGEventTap (and retries automatically if it fails).
 pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
     thread::spawn(move || {
-        // ── macOS: poll until both permissions are granted ────────────────
+        // ── macOS: wait until both permissions are granted ────────────────
         #[cfg(target_os = "macos")]
         {
             loop {
@@ -46,10 +72,9 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
         loop {
             let tx = tx.clone();
 
-            // Position tracking — rdev maps kCGEventLeftMouseDragged → MouseMove,
-            // so cur_x/cur_y update correctly during a drag.
-            let mut cur_x: f64 = 0.0;
-            let mut cur_y: f64 = 0.0;
+            // Snapshot the cursor position at press time using CGEventGetLocation.
+            // We do NOT rely on rdev MouseMove events for drag tracking because
+            // rdev does not emit MouseMove for kCGEventLeftMouseDragged on macOS.
             let mut press_x: f64 = 0.0;
             let mut press_y: f64 = 0.0;
             let mut button_down = false;
@@ -63,36 +88,37 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
 
             let result = listen(move |event: Event| {
                 match event.event_type {
-                    // MouseMove fires for both hover AND drag (kCGEventLeftMouseDragged)
-                    EventType::MouseMove { x, y } => {
-                        cur_x = x;
-                        cur_y = y;
-                    }
                     EventType::ButtonPress(Button::Left) => {
-                        press_x = cur_x;
-                        press_y = cur_y;
+                        // Snapshot real cursor position at the moment of press
+                        let (x, y) = cursor_pos();
+                        press_x = x;
+                        press_y = y;
                         button_down = true;
+                        eprintln!("[pluks] MouseDown at ({:.0},{:.0})", x, y);
                     }
                     EventType::ButtonRelease(Button::Left) => {
                         if !button_down { return; }
                         button_down = false;
 
+                        // Snapshot real cursor position at release — works even
+                        // after a drag where rdev never emitted MouseMove events.
+                        let (cur_x, cur_y) = cursor_pos();
                         let dx = (cur_x - press_x).abs();
                         let dy = (cur_y - press_y).abs();
                         let since_last_release = last_release.elapsed().as_millis();
                         last_release = Instant::now();
 
-                        // Drag: cursor moved more than 4 px while button was held
+                        // Drag: cursor moved more than 4 px
                         let is_drag = dx > 4.0 || dy > 4.0;
-                        // Multi-click (double/triple): two quick releases within 600 ms
-                        // Gap > 30 ms guards against duplicate events from one click
+                        // Multi-click: two quick releases within 600 ms (but gap > 30 ms
+                        // to avoid duplicate events from a single physical click)
                         let is_multi_click = !is_drag
                             && since_last_release < 600
                             && since_last_release > 30;
 
                         eprintln!(
-                            "[pluks] MouseUp dx={:.1} dy={:.1} gap={}ms drag={} multi={}",
-                            dx, dy, since_last_release, is_drag, is_multi_click
+                            "[pluks] MouseUp at ({:.0},{:.0}) dx={:.1} dy={:.1} gap={}ms drag={} multi={}",
+                            cur_x, cur_y, dx, dy, since_last_release, is_drag, is_multi_click
                         );
 
                         if is_drag || is_multi_click {
@@ -122,7 +148,6 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
 // ── Shared: simulate copy + read clipboard ────────────────────────────────────
 
 /// Simulates Cmd+C (macOS) or Ctrl+C (Windows/Linux).
-/// Requires Accessibility permission on macOS.
 pub fn simulate_copy() {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
