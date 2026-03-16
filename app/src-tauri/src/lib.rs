@@ -6,7 +6,7 @@ use selection::{read_clipboard, simulate_copy, start_listener, SelectionSignal};
 
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -19,6 +19,9 @@ use tauri::{
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
     pub watcher_enabled: Arc<Mutex<bool>>,
+    /// Timestamp of the last manual copy_item call.
+    /// The processor ignores SelectionSignals that arrive within 1 s of this.
+    pub last_manual_copy: Arc<Mutex<Instant>>,
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
@@ -44,6 +47,8 @@ fn copy_item(id: i64, state: State<Arc<AppState>>) -> bool {
     };
 
     if let Some(t) = text {
+        // Mark the time so the selection processor ignores the click that triggered this
+        *state.last_manual_copy.lock().unwrap() = Instant::now();
         use arboard::Clipboard;
         if let Ok(mut clip) = Clipboard::new() {
             clip.set_text(t.as_str()).is_ok()
@@ -161,10 +166,20 @@ fn start_copy_processor(
                 continue;
             }
 
-            // Skip if the history overlay is the focused window — we don't want
-            // to auto-copy text the user selects inside Pluck itself.
+            // Skip if the history overlay is the focused window
             if let Some(win) = app_handle.get_webview_window("history") {
                 if win.is_focused().unwrap_or(false) {
+                    continue;
+                }
+            }
+
+            // Skip if a manual copy_item was triggered within the last second —
+            // the click that fired copy_item also triggers a SelectionSignal and
+            // would otherwise re-save the just-pasted item.
+            {
+                let last = *state.last_manual_copy.lock().unwrap();
+                if last.elapsed() < Duration::from_millis(1000) {
+                    eprintln!("[pluks] suppressing signal (manual copy was {}ms ago)", last.elapsed().as_millis());
                     continue;
                 }
             }
@@ -235,6 +250,7 @@ pub fn run() {
             let state = Arc::new(AppState {
                 db: Arc::new(Mutex::new(db)),
                 watcher_enabled: Arc::new(Mutex::new(true)),
+                last_manual_copy: Arc::new(Mutex::new(Instant::now() - Duration::from_secs(60))),
             });
             app.manage(state.clone());
 

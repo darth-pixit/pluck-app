@@ -47,8 +47,8 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
             let tx = tx.clone();
 
             let mut press_time: Option<Instant> = None;
-            let mut last_press = Instant::now();
-            let mut click_count: u32 = 0;
+            // Initialise far in the past so the first release is never treated as a double-click
+            let mut last_release = Instant::now() - Duration::from_secs(10);
 
             eprintln!("[pluks] rdev listener starting...");
 
@@ -57,15 +57,7 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
             let result = listen(move |event: Event| {
                 match event.event_type {
                     EventType::ButtonPress(Button::Left) => {
-                        let now = Instant::now();
-                        if now.duration_since(last_press) < Duration::from_millis(500) {
-                            click_count += 1;
-                        } else {
-                            click_count = 1;
-                        }
-                        last_press = now;
-                        press_time = Some(now);
-                        eprintln!("[pluks] MouseDown click#{}", click_count);
+                        press_time = Some(Instant::now());
                     }
                     EventType::ButtonRelease(Button::Left) => {
                         let held_ms = press_time
@@ -73,22 +65,25 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
                             .unwrap_or(0);
                         press_time = None;
 
-                        // A drag-select holds the button for >120ms.
-                        // A quick single click is usually <120ms — skip it.
-                        let is_drag = held_ms > 120;
-                        let is_multi_click = click_count >= 2;
+                        let since_last_release = last_release.elapsed().as_millis();
+                        last_release = Instant::now();
+
+                        // Drag-select: button held for >200 ms
+                        let is_drag = held_ms > 200;
+                        // Double-click: two quick releases within 500 ms of each other
+                        // (guard: gap must be >50 ms so two events from one physical click don't count)
+                        let is_double_click = !is_drag
+                            && since_last_release < 500
+                            && since_last_release > 50;
 
                         eprintln!(
-                            "[pluks] MouseUp held={}ms drag={} multi={} clicks={}",
-                            held_ms, is_drag, is_multi_click, click_count
+                            "[pluks] MouseUp held={}ms gap={}ms drag={} dbl={}",
+                            held_ms, since_last_release, is_drag, is_double_click
                         );
 
-                        if is_drag || is_multi_click {
+                        if is_drag || is_double_click {
                             eprintln!("[pluks] SelectionSignal sent!");
                             let _ = tx.send(SelectionSignal);
-                            if is_multi_click {
-                                click_count = 0;
-                            }
                         }
                     }
                     _ => {}

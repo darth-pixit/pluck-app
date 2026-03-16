@@ -192,7 +192,7 @@ export default function App() {
   if (needsSetup) {
     return (
       <div className="panel">
-        <div className="titlebar" data-tauri-drag-region>
+        <div className="titlebar">
           <div className="traffic-lights">
             <button
               className="tl tl-close"
@@ -215,8 +215,8 @@ export default function App() {
 
   return (
     <div className="panel">
-      {/* Title bar */}
-      <div className="titlebar" data-tauri-drag-region>
+      {/* Title bar — drag region is only the brand text, not the buttons */}
+      <div className="titlebar">
         <div className="traffic-lights">
           <button
             className="tl tl-close"
@@ -232,7 +232,7 @@ export default function App() {
         <span className="brand" data-tauri-drag-region>
           pluks
         </span>
-        <span className="count">{items.length} / 100</span>
+        <span className="count" data-tauri-drag-region>{items.length} / 100</span>
       </div>
 
       <div className="search-row">
@@ -242,6 +242,12 @@ export default function App() {
           placeholder="Search history…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // Let arrow keys and Enter navigate the list instead of moving cursor
+            if (["ArrowUp", "ArrowDown", "Enter"].includes(e.key)) {
+              e.preventDefault();
+            }
+          }}
         />
       </div>
 
@@ -261,7 +267,7 @@ export default function App() {
         <button className="btn-clear" onClick={handleClear}>
           Clear all
         </button>
-        <span className="hint">↩ copy · ⌫ delete · esc close</span>
+        <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close</span>
       </div>
     </div>
   );
