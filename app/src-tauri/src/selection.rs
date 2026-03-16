@@ -46,8 +46,15 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
         loop {
             let tx = tx.clone();
 
-            let mut press_time: Option<Instant> = None;
-            // Initialise far in the past so the first release is never treated as a double-click
+            // Position tracking — rdev maps kCGEventLeftMouseDragged → MouseMove,
+            // so cur_x/cur_y update correctly during a drag.
+            let mut cur_x: f64 = 0.0;
+            let mut cur_y: f64 = 0.0;
+            let mut press_x: f64 = 0.0;
+            let mut press_y: f64 = 0.0;
+            let mut button_down = false;
+
+            // For double/triple-click detection
             let mut last_release = Instant::now() - Duration::from_secs(10);
 
             eprintln!("[pluks] rdev listener starting...");
@@ -56,30 +63,36 @@ pub fn start_listener(tx: mpsc::Sender<SelectionSignal>) {
 
             let result = listen(move |event: Event| {
                 match event.event_type {
+                    // MouseMove fires for both hover AND drag (kCGEventLeftMouseDragged)
+                    EventType::MouseMove { x, y } => {
+                        cur_x = x;
+                        cur_y = y;
+                    }
                     EventType::ButtonPress(Button::Left) => {
-                        press_time = Some(Instant::now());
+                        press_x = cur_x;
+                        press_y = cur_y;
+                        button_down = true;
                     }
                     EventType::ButtonRelease(Button::Left) => {
-                        let held_ms = press_time
-                            .map(|t| t.elapsed().as_millis())
-                            .unwrap_or(0);
-                        press_time = None;
+                        if !button_down { return; }
+                        button_down = false;
 
+                        let dx = (cur_x - press_x).abs();
+                        let dy = (cur_y - press_y).abs();
                         let since_last_release = last_release.elapsed().as_millis();
                         last_release = Instant::now();
 
-                        // Drag-select: button held for >180 ms
-                        let is_drag = held_ms > 180;
-                        // Multi-click (double or triple): two or more quick releases
-                        // within 600 ms of each other. Gap >30 ms guards against
-                        // spurious duplicate events from a single physical click.
+                        // Drag: cursor moved more than 4 px while button was held
+                        let is_drag = dx > 4.0 || dy > 4.0;
+                        // Multi-click (double/triple): two quick releases within 600 ms
+                        // Gap > 30 ms guards against duplicate events from one click
                         let is_multi_click = !is_drag
                             && since_last_release < 600
                             && since_last_release > 30;
 
                         eprintln!(
-                            "[pluks] MouseUp held={}ms gap={}ms drag={} multi={}",
-                            held_ms, since_last_release, is_drag, is_multi_click
+                            "[pluks] MouseUp dx={:.1} dy={:.1} gap={}ms drag={} multi={}",
+                            dx, dy, since_last_release, is_drag, is_multi_click
                         );
 
                         if is_drag || is_multi_click {
