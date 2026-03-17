@@ -5,8 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import HistoryPanel from "./HistoryPanel";
 import "./index.css";
 
-const hideWindow    = () => invoke("hide_window").catch(() => getCurrentWindow().hide());
-const minimizeWindow = () => invoke("minimize_window").catch(() => getCurrentWindow().minimize());
+// Use direct Tauri window API — never goes through Rust invoke, always reliable
+const hideWindow    = () => getCurrentWindow().hide();
+const minimizeWindow = () => getCurrentWindow().hide();  // accessory windows have no dock tile; hide is the right action
 
 export interface HistoryItem {
   id: number;
@@ -134,7 +135,8 @@ export default function App() {
           await invoke("copy_item", { id });
           await hideWindow();
           // Give macOS ~150 ms to restore focus to the previous app, then paste
-          await new Promise(r => setTimeout(r, 150));
+          // 200 ms gives macOS time to shift focus back to the previous app
+          await new Promise(r => setTimeout(r, 200));
           await invoke("invoke_paste");
         }
       }
@@ -177,7 +179,7 @@ export default function App() {
       <div className="panel">
         <div className="titlebar">
           <div className="traffic-lights">
-            <button className="tl tl-close" title="Close" onMouseDown={e => e.stopPropagation()} onClick={hideWindow} />
+            <button className="tl tl-close" title="Close" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
           </div>
           <span className="brand" data-tauri-drag-region>pluks</span>
         </div>
@@ -190,8 +192,8 @@ export default function App() {
     <div className="panel">
       <div className="titlebar">
         <div className="traffic-lights">
-          <button className="tl tl-close" title="Close"    onMouseDown={e => e.stopPropagation()} onClick={hideWindow} />
-          <button className="tl tl-min"   title="Minimise" onMouseDown={e => e.stopPropagation()} onClick={minimizeWindow} />
+          <button className="tl tl-close" title="Close"    onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
+          <button className="tl tl-min"   title="Minimise" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); minimizeWindow(); }} />
         </div>
         <span className="brand" data-tauri-drag-region>pluks</span>
         <span className="count" data-tauri-drag-region>{items.length} / 100</span>

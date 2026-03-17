@@ -127,7 +127,13 @@ fn show_history_window<R: Runtime>(window: &WebviewWindow<R>, keyboard: bool) {
 fn toggle_history_window<R: Runtime>(app: &AppHandle<R>, keyboard: bool) {
     if let Some(win) = app.get_webview_window("history") {
         if win.is_visible().unwrap_or(false) {
-            let _ = win.hide();
+            if keyboard {
+                // Panel already open — just activate keyboard mode, don't close it
+                let _ = win.set_focus();
+                let _ = win.emit("keyboard-open", ());
+            } else {
+                let _ = win.hide();
+            }
         } else {
             show_history_window(&win, keyboard);
         }
@@ -142,7 +148,8 @@ fn start_copy_processor(rx: mpsc::Receiver<SelectionSignal>, state: Arc<AppState
             if !*state.watcher_enabled.lock().unwrap_or_else(|e| e.into_inner()) { continue; }
 
             if let Some(win) = app_handle.get_webview_window("history") {
-                if win.is_focused().unwrap_or(false) { continue; }
+                // Skip if the panel is currently visible (user is interacting with it)
+                if win.is_visible().unwrap_or(false) { continue; }
             }
 
             // Suppress if a manual copy happened within 500 ms
