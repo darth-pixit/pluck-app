@@ -5,6 +5,7 @@ interface Props {
   items: HistoryItem[];
   onCopy: (id: number) => void;
   onDelete: (id: number) => void;
+  onActiveChange?: (id: number) => void;
 }
 
 function timeAgo(ts: string): string {
@@ -17,9 +18,14 @@ function timeAgo(ts: string): string {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
-export default function HistoryPanel({ items, onCopy, onDelete }: Props) {
+export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange }: Props) {
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+
+  // Notify parent whenever active item changes (used by keyboard-mode paste)
+  useEffect(() => {
+    if (items[active]) onActiveChange?.(items[active].id);
+  }, [active, items, onActiveChange]);
 
   // Keyboard navigation
   useEffect(() => {
