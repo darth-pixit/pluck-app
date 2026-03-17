@@ -241,7 +241,7 @@
       <div class="platform-icon">🍎</div>
       <h3>macOS</h3>
       <p>11.0 Big Sur or later<br>Apple Silicon + Intel</p>
-      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluks_0.1.0_aarch64.dmg">
+      <a class="btn-download" id="dl-mac" href="https://github.com/darth-pixit/pluck-app/releases/latest">
         Download .dmg
       </a>
     </div>
@@ -250,7 +250,7 @@
       <div class="platform-icon">🪟</div>
       <h3>Windows</h3>
       <p>Windows 10 / 11<br>64-bit</p>
-      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluks_0.1.0_x64_en-US.msi">
+      <a class="btn-download" id="dl-win" href="https://github.com/darth-pixit/pluck-app/releases/latest">
         Download .msi
       </a>
     </div>
@@ -259,7 +259,7 @@
       <div class="platform-icon">🐧</div>
       <h3>Linux</h3>
       <p>Any modern distro<br>AppImage · .deb</p>
-      <a class="btn-download" href="https://github.com/darth-pixit/pluck-app/releases/latest/download/Pluks_0.1.0_amd64.AppImage">
+      <a class="btn-download" id="dl-linux" href="https://github.com/darth-pixit/pluck-app/releases/latest">
         Download .AppImage
       </a>
     </div>
@@ -282,5 +282,28 @@
 </footer>
 
 <script src="demo.js"></script>
+<script>
+// Auto-resolve download links from the latest GitHub release so the website
+// never goes stale when a new version ships.
+fetch('https://api.github.com/repos/darth-pixit/pluck-app/releases/latest')
+  .then(r => r.json())
+  .then(release => {
+    const assets = release.assets || [];
+    // Detect arm64 vs x64 Mac by user agent; fall back to arm64 (most common)
+    const isIntelMac = /Intel/.test(navigator.userAgent);
+    const macAsset = assets.find(a =>
+      isIntelMac ? a.name.endsWith('_x64.dmg') : a.name.endsWith('_aarch64.dmg')
+    ) || assets.find(a => a.name.includes('.dmg'));
+    const winAsset   = assets.find(a => a.name.endsWith('_x64_en-US.msi') || a.name.endsWith('.msi'));
+    const linuxAsset = assets.find(a => a.name.endsWith('_amd64.AppImage'));
+    if (macAsset)   document.getElementById('dl-mac').href   = macAsset.browser_download_url;
+    if (winAsset)   document.getElementById('dl-win').href   = winAsset.browser_download_url;
+    if (linuxAsset) document.getElementById('dl-linux').href = linuxAsset.browser_download_url;
+    // Show version badge if element exists
+    const badge = document.getElementById('version-badge');
+    if (badge && release.tag_name) badge.textContent = release.tag_name;
+  })
+  .catch(() => { /* fallback hrefs already point to /releases/latest */ });
+</script>
 </body>
 </html>
