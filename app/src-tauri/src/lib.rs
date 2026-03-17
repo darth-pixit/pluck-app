@@ -19,8 +19,6 @@ use tauri::{
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
     pub watcher_enabled: Arc<Mutex<bool>>,
-    /// Set by copy_item so the processor suppresses the next spurious SelectionSignal.
-    pub last_manual_copy: Arc<Mutex<Instant>>,
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
@@ -37,7 +35,6 @@ fn copy_item(id: i64, state: State<Arc<AppState>>) -> bool {
         db.get_all().unwrap_or_default().into_iter().find(|i| i.id == id).map(|i| i.content)
     };
     if let Some(t) = text {
-        *state.last_manual_copy.lock().unwrap() = Instant::now();
         use arboard::Clipboard;
         if let Ok(mut clip) = Clipboard::new() { clip.set_text(t.as_str()).is_ok() } else { false }
     } else { false }
@@ -152,15 +149,6 @@ fn start_copy_processor(rx: mpsc::Receiver<SelectionSignal>, state: Arc<AppState
                 if win.is_visible().unwrap_or(false) { continue; }
             }
 
-            // Suppress if a manual copy happened within 500 ms
-            {
-                let last = *state.last_manual_copy.lock().unwrap();
-                if last.elapsed() < Duration::from_millis(500) {
-                    eprintln!("[pluks] suppressed (manual copy {}ms ago)", last.elapsed().as_millis());
-                    continue;
-                }
-            }
-
             let before = read_clipboard();
             thread::sleep(Duration::from_millis(80));
             eprintln!("[pluks] simulating copy...");
@@ -215,7 +203,6 @@ pub fn run() {
             let state = Arc::new(AppState {
                 db: Arc::new(Mutex::new(db)),
                 watcher_enabled: Arc::new(Mutex::new(true)),
-                last_manual_copy: Arc::new(Mutex::new(Instant::now() - Duration::from_secs(60))),
             });
             app.manage(state.clone());
 
