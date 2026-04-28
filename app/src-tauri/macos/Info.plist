@@ -6,8 +6,6 @@
   <true/>
   <key>NSInputMonitoringUsageDescription</key>
   <string>Pluks monitors mouse events to detect when you select text, so it can auto-copy your selection.</string>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>Pluks uses accessibility to simulate copying your selected text.</string>
   <key>NSAccessibilityUsageDescription</key>
   <string>Pluks uses accessibility to simulate copying your selected text.</string>
 </dict>

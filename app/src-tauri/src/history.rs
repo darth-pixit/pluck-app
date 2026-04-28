@@ -1,6 +1,8 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result, Row};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+pub const HISTORY_LIMIT: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryItem {
@@ -12,11 +14,22 @@ pub struct HistoryItem {
 
 pub struct Database {
     conn: Connection,
+    row_count: usize,
+}
+
+fn map_row(row: &Row) -> rusqlite::Result<HistoryItem> {
+    let content: String = row.get(1)?;
+    let char_count = content.chars().count();
+    Ok(HistoryItem {
+        id: row.get(0)?,
+        content,
+        copied_at: row.get(2)?,
+        char_count,
+    })
 }
 
 impl Database {
     pub fn new(db_path: PathBuf) -> Result<Self> {
-        // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -33,13 +46,18 @@ impl Database {
              CREATE INDEX IF NOT EXISTS idx_copied_at ON history(copied_at DESC);",
         )?;
 
-        Ok(Self { conn })
+        let row_count: usize = conn
+            .query_row("SELECT COUNT(*) FROM history", [], |r| {
+                r.get::<_, i64>(0).map(|n| n as usize)
+            })
+            .unwrap_or(0);
+
+        Ok(Self { conn, row_count })
     }
 
-    /// Insert a new entry. If the same content is already the most recent entry, skip.
-    /// Trims to 100 entries after insert.
+    /// Insert a new entry. If it duplicates the most-recent entry, return that row unchanged.
+    /// Trims to HISTORY_LIMIT only when actually exceeded.
     pub fn insert(&mut self, content: &str) -> Result<HistoryItem> {
-        // Deduplicate against the most recent entry
         let most_recent: Option<String> = self
             .conn
             .query_row(
@@ -50,85 +68,69 @@ impl Database {
             .ok();
 
         if most_recent.as_deref() == Some(content) {
-            // Return the existing top item refreshed
             return self.conn.query_row(
                 "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC LIMIT 1",
                 [],
-                |row| {
-                    let text: String = row.get(1)?;
-                    let len = text.chars().count();
-                    Ok(HistoryItem {
-                        id: row.get(0)?,
-                        content: text,
-                        copied_at: row.get(2)?,
-                        char_count: len,
-                    })
-                },
+                map_row,
             );
         }
 
-        self.conn.execute(
-            "INSERT INTO history (content) VALUES (?1)",
+        // RETURNING folds INSERT + post-insert SELECT into one statement.
+        let item: HistoryItem = self.conn.query_row(
+            "INSERT INTO history (content) VALUES (?1) RETURNING id, content, copied_at",
             params![content],
+            map_row,
         )?;
-        let id = self.conn.last_insert_rowid();
+        self.row_count += 1;
 
-        // Trim to 100 entries (keep the newest)
-        self.conn.execute(
-            "DELETE FROM history WHERE id NOT IN (
-               SELECT id FROM history ORDER BY copied_at DESC LIMIT 100
-             )",
-            [],
-        )?;
+        if self.row_count > HISTORY_LIMIT {
+            let removed = self.conn.execute(
+                "DELETE FROM history WHERE id NOT IN (
+                   SELECT id FROM history ORDER BY copied_at DESC LIMIT ?1
+                 )",
+                params![HISTORY_LIMIT as i64],
+            )?;
+            self.row_count = self.row_count.saturating_sub(removed);
+        }
 
-        // Re-query so copied_at is always the SQLite-generated ISO datetime
-        self.conn.query_row(
-            "SELECT id, content, copied_at FROM history WHERE id = ?1",
-            params![id],
-            |row| {
-                let text: String = row.get(1)?;
-                let len = text.chars().count();
-                Ok(HistoryItem {
-                    id: row.get(0)?,
-                    content: text,
-                    copied_at: row.get(2)?,
-                    char_count: len,
-                })
-            },
-        )
+        Ok(item)
     }
 
     pub fn get_all(&self) -> Result<Vec<HistoryItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC LIMIT 100",
+            "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC LIMIT ?1",
         )?;
-        let items = stmt.query_map([], |row| {
-            let text: String = row.get(1)?;
-            let len = text.chars().count();
-            Ok(HistoryItem {
-                id: row.get(0)?,
-                content: text,
-                copied_at: row.get(2)?,
-                char_count: len,
-            })
-        })?;
-
-        let mut result = Vec::new();
-        for item in items {
-            result.push(item?);
+        let rows = stmt.query_map(params![HISTORY_LIMIT as i64], map_row)?;
+        let mut out = Vec::with_capacity(HISTORY_LIMIT);
+        for row in rows {
+            out.push(row?);
         }
-        Ok(result)
+        Ok(out)
+    }
+
+    pub fn get_content_by_id(&self, id: i64) -> Result<Option<String>> {
+        match self.conn.query_row(
+            "SELECT content FROM history WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(text) => Ok(Some(text)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn delete(&mut self, id: i64) -> Result<()> {
-        self.conn
+        let n = self
+            .conn
             .execute("DELETE FROM history WHERE id = ?1", params![id])?;
+        self.row_count = self.row_count.saturating_sub(n);
         Ok(())
     }
 
     pub fn clear_all(&mut self) -> Result<()> {
         self.conn.execute("DELETE FROM history", [])?;
+        self.row_count = 0;
         Ok(())
     }
 }
-

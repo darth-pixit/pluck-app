@@ -54,9 +54,6 @@ html, body, #root {
   align-items: center;
   gap: 6px;
   margin-right: 10px;
-}
-
-.traffic-lights {
   -webkit-app-region: no-drag;
 }
 
@@ -68,14 +65,10 @@ html, body, #root {
   cursor: pointer;
   padding: 0;
   transition: filter .12s;
-  -webkit-app-region: no-drag;
 }
 
 .tl-close { background: #FF5F57; }
-.tl-min   { background: #FEBC2E; }
-
 .tl-close:hover { filter: brightness(0.8); }
-.tl-min:hover   { filter: brightness(0.8); }
 
 .brand {
   font-size: 14px;
