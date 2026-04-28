@@ -359,3 +359,55 @@ html, body, #root {
   color: var(--muted);
   letter-spacing: .02em;
 }
+
+/* ── Smart paste detectors ── */
+.kind-badge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background: rgba(252, 76, 2, 0.16);
+  color: var(--accent-2);
+  vertical-align: 1px;
+}
+.kind-badge.kind-json   { background: rgba(96,165,250,0.16); color: #93C5FD; }
+.kind-badge.kind-url    { background: rgba(167,139,250,0.16); color: #C4B5FD; }
+.kind-badge.kind-email  { background: rgba(52,211,153,0.16); color: #6EE7B7; }
+.kind-badge.kind-color  { background: rgba(244,114,182,0.16); color: #F9A8D4; }
+.kind-badge.kind-code   { background: rgba(251,191,36,0.16); color: #FCD34D; }
+
+.paste-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.paste-actions-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+.paste-action {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.paste-action:hover {
+  border-color: var(--accent);
+  background: rgba(252, 76, 2, 0.12);
+  color: var(--accent-2);
+}

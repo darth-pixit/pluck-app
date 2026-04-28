@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryItem } from "./App";
+import { detect, type PasteAction } from "./detectors";
 
 interface Props {
   items: HistoryItem[];
   onCopy: (id: number) => void;
   onDelete: (id: number) => void;
   onActiveChange?: (id: number) => void;
+  onCopyTransformed?: (text: string) => void;
 }
 
 function timeAgo(ts: string, now: number): string {
@@ -23,10 +25,20 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
 }
 
-export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange }: Props) {
+export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, onCopyTransformed }: Props) {
   const [active, setActive] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLUListElement>(null);
+
+  const activeItem = items[active];
+  const activeDetection = useMemo(
+    () => (activeItem ? detect(activeItem.content) : null),
+    [activeItem],
+  );
+  const itemKinds = useMemo(
+    () => items.map(i => detect(i.content)?.badge ?? null),
+    [items],
+  );
 
   useEffect(() => {
     if (items[active]) onActiveChange?.(items[active].id);
@@ -69,33 +81,60 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange }
     el?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
+  const handleAction = (action: PasteAction) => {
+    if (!activeItem || !onCopyTransformed) return;
+    onCopyTransformed(action.transform(activeItem.content));
+  };
+
   return (
-    <ul className="history-list" ref={listRef}>
-      {items.map((item, idx) => (
-        <li
-          key={item.id}
-          className={`history-item ${idx === active ? "active" : ""}`}
-          onMouseEnter={() => setActive(idx)}
-          onClick={() => onCopy(item.id)}
-        >
-          <span className="item-preview">
-            {item.content.length > 120
-              ? item.content.slice(0, 120) + "…"
-              : item.content}
-          </span>
-          <div className="item-meta">
-            <span className="item-chars">{item.char_count} chars</span>
-            <span className="item-time">{timeAgo(item.copied_at, now)}</span>
+    <>
+      <ul className="history-list" ref={listRef}>
+        {items.map((item, idx) => (
+          <li
+            key={item.id}
+            className={`history-item ${idx === active ? "active" : ""}`}
+            onMouseEnter={() => setActive(idx)}
+            onClick={() => onCopy(item.id)}
+          >
+            <span className="item-preview">
+              {itemKinds[idx] && (
+                <span className={`kind-badge kind-${itemKinds[idx]!.toLowerCase()}`}>
+                  {itemKinds[idx]}
+                </span>
+              )}
+              {item.content.length > 120
+                ? item.content.slice(0, 120) + "…"
+                : item.content}
+            </span>
+            <div className="item-meta">
+              <span className="item-chars">{item.char_count} chars</span>
+              <span className="item-time">{timeAgo(item.copied_at, now)}</span>
+              <button
+                className="item-delete"
+                title="Delete"
+                onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+              >
+                ×
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {activeDetection && (
+        <div className="paste-actions">
+          <span className="paste-actions-label">Paste as</span>
+          {activeDetection.actions.map(action => (
             <button
-              className="item-delete"
-              title="Delete"
-              onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+              key={action.label}
+              className="paste-action"
+              title={`Paste ${activeItem!.content.slice(0, 40)}… as ${action.label}`}
+              onClick={(e) => { e.stopPropagation(); handleAction(action); }}
             >
-              ×
+              {action.label}
             </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

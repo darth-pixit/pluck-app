@@ -204,6 +204,17 @@ export default function App() {
     await invoke("invoke_paste");
   }, []);
 
+  // Smart-paste: a detector produced a transformed string; push it onto the
+  // clipboard directly (bypassing copy_item, which only knows raw rows) and
+  // paste into the previously-focused app.
+  const handleCopyTransformed = useCallback(async (text: string) => {
+    setKeyboardMode(false);
+    await invoke("copy_text", { text });
+    await hideWindow();
+    await new Promise(r => setTimeout(r, PASTE_FOCUS_RESTORE_MS));
+    await invoke("invoke_paste");
+  }, []);
+
   const handleDelete = useCallback(async (id: number) => {
     const ok = await invoke<boolean>("delete_item", { id });
     if (ok) setItems(prev => prev.filter(i => i.id !== id));
@@ -262,6 +273,7 @@ export default function App() {
           onCopy={handleCopy}
           onDelete={handleDelete}
           onActiveChange={id => { activeItemIdRef.current = id; }}
+          onCopyTransformed={handleCopyTransformed}
         />
       )}
 

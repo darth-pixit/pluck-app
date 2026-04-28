@@ -70,6 +70,14 @@ fn copy_item(id: i64, state: State<Arc<AppState>>) -> bool {
     text.map(|t| write_clipboard(&t)).unwrap_or(false)
 }
 
+/// Push arbitrary text onto the clipboard. Used by smart-paste detectors that
+/// need to paste a transformed variant of a history item (pretty JSON, markdown
+/// link, rgb() form of a hex color, etc.) rather than the raw stored content.
+#[tauri::command]
+fn copy_text(text: String) -> bool {
+    write_clipboard(&text)
+}
+
 #[tauri::command]
 fn delete_item(id: i64, state: State<Arc<AppState>>) -> bool {
     state.db().delete(id).is_ok()
@@ -475,6 +483,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_history,
             copy_item,
+            copy_text,
             delete_item,
             clear_history,
             check_accessibility,
