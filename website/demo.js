@@ -11,6 +11,8 @@
   if (!demoText || !toast || !toastText) return;
 
   let toastTimeout;
+  let demoFirstAt = 0;
+  let demoSelections = 0;
 
   function showToast(text) {
     const preview =
@@ -39,6 +41,22 @@
     }
 
     showToast(selectedText);
+
+    // Anonymous bucketed instrumentation — never sends the selected text.
+    try {
+      if (window.Pluks && window.Pluks.track) {
+        if (!demoFirstAt) demoFirstAt = Date.now();
+        demoSelections++;
+        window.Pluks.track("demo_interacted", {
+          selection_chars_bucket: window.Pluks.bucket(selectedText.length)
+        });
+        if (demoSelections === 3) {
+          window.Pluks.track("demo_completed", {
+            time_to_complete_ms: Date.now() - demoFirstAt
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   document.addEventListener("mouseup", function () {
@@ -61,17 +79,36 @@
     if (!modal || !form) return;
 
     let pendingHref = null;
+    let pendingPlatform = null;
 
-    function open(href) {
+    function platformFromHref(href) {
+      if (/dmg/i.test(href)) return /Intel|x64/i.test(href) ? "mac_intel" : "mac";
+      if (/msi/i.test(href)) return "win";
+      if (/AppImage/i.test(href)) return "linux_appimage";
+      if (/\.deb/i.test(href)) return "linux_deb";
+      return "unknown";
+    }
+
+    function track(event, props) {
+      try { if (window.Pluks && window.Pluks.track) window.Pluks.track(event, props || {}); } catch (_) {}
+    }
+
+    function open(href, platform) {
       pendingHref = href;
+      pendingPlatform = platform;
       modal.classList.add("show");
       modal.setAttribute("aria-hidden", "false");
       setTimeout(function () { emailInput && emailInput.focus(); }, 50);
+      track("download_modal_opened", { platform: platform });
     }
-    function close() {
+    function close(via) {
+      if (modal.classList.contains("show") && via) {
+        track("download_modal_closed", { platform: pendingPlatform || "unknown", via: via });
+      }
       modal.classList.remove("show");
       modal.setAttribute("aria-hidden", "true");
       pendingHref = null;
+      pendingPlatform = null;
       errorEl.hidden = true;
     }
 
@@ -81,16 +118,16 @@
         if (!href) return;
         if (sessionStorage.getItem("pluks_dl_ok") === "1") return; // already submitted this session
         e.preventDefault();
-        open(href);
+        open(href, platformFromHref(href));
       });
     });
 
-    closeBtn && closeBtn.addEventListener("click", close);
+    closeBtn && closeBtn.addEventListener("click", function () { close("close_button"); });
     modal.addEventListener("click", function (e) {
-      if (e.target === modal) close();
+      if (e.target === modal) close("backdrop");
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && modal.classList.contains("show")) close();
+      if (e.key === "Escape" && modal.classList.contains("show")) close("escape");
     });
 
     form.addEventListener("submit", function (e) {
@@ -101,6 +138,7 @@
       if (!emailOk || !persona) {
         errorEl.textContent = !emailOk ? "Please enter a valid work email." : "Please pick a persona.";
         errorEl.hidden = false;
+        track("download_form_invalid", { reason: !emailOk ? "invalid_email" : "missing_persona" });
         return;
       }
       try {
@@ -109,6 +147,9 @@
         localStorage.setItem("pluks_leads", JSON.stringify(leads));
       } catch (_) {}
       sessionStorage.setItem("pluks_dl_ok", "1");
+
+      // Persona is a low-cardinality category (no PII). Email is NEVER sent.
+      track("download_form_submitted", { platform: pendingPlatform || "unknown", persona: persona });
 
       const href = pendingHref;
       close();

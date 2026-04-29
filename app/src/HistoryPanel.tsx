@@ -5,9 +5,10 @@ import { detect, type PasteAction } from "./detectors";
 interface Props {
   items: HistoryItem[];
   onCopy: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number, via: "keyboard" | "click") => void;
   onActiveChange?: (id: number) => void;
-  onCopyTransformed?: (text: string) => void;
+  onCopyTransformed?: (text: string, action_label: string, kind: string) => void;
+  onNavigate?: (direction: "up" | "down", from: number, to: number) => void;
 }
 
 function timeAgo(ts: string, now: number): string {
@@ -25,7 +26,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
 }
 
-export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, onCopyTransformed }: Props) {
+export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, onCopyTransformed, onNavigate }: Props) {
   const [active, setActive] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLUListElement>(null);
@@ -47,13 +48,26 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
   // Keyboard navigation. Functional setters keep `active` out of the dep array,
   // so this listener doesn't churn on every arrow keypress.
   useEffect(() => {
+    // Sample 1-in-10 nav events to keep volume sane. Sampling happens outside
+    // the setState updater so React strict-mode double-invocation in dev
+    // doesn't double the effective sample rate.
     const handler = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setActive(a => Math.min(a + 1, items.length - 1));
+        const sampled = Math.random() < 0.1;
+        setActive(a => {
+          const next = Math.min(a + 1, items.length - 1);
+          if (next !== a && sampled) onNavigate?.("down", a, next);
+          return next;
+        });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setActive(a => Math.max(a - 1, 0));
+        const sampled = Math.random() < 0.1;
+        setActive(a => {
+          const next = Math.max(a - 1, 0);
+          if (next !== a && sampled) onNavigate?.("up", a, next);
+          return next;
+        });
       } else if (e.key === "Enter") {
         e.preventDefault();
         setActive(a => { if (items[a]) onCopy(items[a].id); return a; });
@@ -61,12 +75,12 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
         // Don't delete an item when the user is editing text in the search input.
         if (isTypingTarget(e.target)) return;
         e.preventDefault();
-        setActive(a => { if (items[a]) onDelete(items[a].id); return a; });
+        setActive(a => { if (items[a]) onDelete(items[a].id, "keyboard"); return a; });
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [items, onCopy, onDelete]);
+  }, [items, onCopy, onDelete, onNavigate]);
 
   useEffect(() => { setActive(0); }, [items]);
 
@@ -77,7 +91,11 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
 
   const handleAction = (action: PasteAction) => {
     if (!activeItem || !onCopyTransformed) return;
-    onCopyTransformed(action.transform(activeItem.content));
+    onCopyTransformed(
+      action.transform(activeItem.content),
+      action.label,
+      activeDetection?.kind ?? "unknown"
+    );
   };
 
   return (
@@ -106,7 +124,7 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
               <button
                 className="item-delete"
                 title="Delete"
-                onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+                onClick={(e) => { e.stopPropagation(); onDelete(item.id, "click"); }}
               >
                 ×
               </button>

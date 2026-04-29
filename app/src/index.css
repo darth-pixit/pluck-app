@@ -411,3 +411,123 @@ html, body, #root {
   background: rgba(252, 76, 2, 0.12);
   color: var(--accent-2);
 }
+
+/* ── Gear / preferences button in titlebar ─────────────────────────── */
+.gear-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 8px;
+  height: 22px;
+  border-radius: 4px;
+  transition: color .12s, background .12s;
+  margin-left: 4px;
+}
+.gear-btn:hover { color: var(--accent-2); background: rgba(255,255,255,0.04); }
+.gear-btn.active { color: var(--accent); }
+
+/* ── Setup screen privacy note ─────────────────────────────────────── */
+.setup-privacy-note {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+  opacity: 0.85;
+}
+.setup-privacy-note strong { color: var(--text); font-weight: 600; }
+
+/* ── Preferences screen ────────────────────────────────────────────── */
+.prefs-screen {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.prefs-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.prefs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.prefs-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 0;
+}
+.prefs-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  padding: 6px 0;
+}
+.prefs-toggle input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+}
+.prefs-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+}
+.prefs-toggle-hint {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+}
+.prefs-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 6px;
+}
+.prefs-btn {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.prefs-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(252,76,2,0.12);
+  color: var(--accent-2);
+}
+.prefs-btn:disabled { opacity: 0.5; cursor: default; }
+.prefs-meta { font-size: 11px; color: var(--muted); margin: 0; }
+.prefs-meta a { color: var(--accent-2); text-decoration: none; }
+.prefs-meta a:hover { text-decoration: underline; }

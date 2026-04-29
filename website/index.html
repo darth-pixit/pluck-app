@@ -8,6 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css"/>
+
+  <!-- PostHog (anonymous, opt-out, no autocapture) -->
+  <script>
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing alias debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  </script>
+  <!-- Sentry browser SDK -->
+  <script src="https://browser.sentry-cdn.com/7.119.0/bundle.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -158,8 +165,8 @@
     </div>
     <div class="feature-card">
       <div class="feature-icon">🔒</div>
-      <h3>100% local</h3>
-      <p>Everything stays on your machine. No cloud sync, no telemetry, no account required.</p>
+      <h3>Local-first</h3>
+      <p>Your selections never leave your machine. We collect anonymous, opt-out usage stats and crash reports — that's it. No cloud sync, no account, no content of what you copy is ever sent. <a href="privacy.html">How we use analytics →</a></p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🌍</div>
@@ -234,6 +241,21 @@
   </p>
 </section>
 
+<!-- ─── PRIVACY & TELEMETRY ──────────────────────────────────────────────── -->
+<section class="privacy-blurb" id="privacy-blurb">
+  <h2 class="section-title">Privacy &amp; telemetry</h2>
+  <p class="download-sub">
+    Pluks is local-first, but anonymous usage data and crash reports help us
+    fix bugs and prioritize what to build next. Here's exactly what we do.
+  </p>
+  <ul class="privacy-bullets">
+    <li><strong>What we send:</strong> anonymous event counts (panel opens, history clicks, smart-paste use), error and crash stack traces, app/OS version, locale.</li>
+    <li><strong>What we never send:</strong> the text you copy, the websites you visit, your name or email, anything that could identify you.</li>
+    <li><strong>How to turn it off:</strong> desktop app → ⚙ Preferences → "Send anonymous usage stats". Website → respects Do Not Track.</li>
+  </ul>
+  <p class="ext-note"><a href="privacy.html">Read the full privacy policy →</a></p>
+</section>
+
 <!-- ─── DOWNLOAD MODAL ────────────────────────────────────────────────────── -->
 <div class="modal-backdrop" id="dl-modal" aria-hidden="true">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dl-modal-title">
@@ -275,6 +297,7 @@
 </footer>
 
 <script src="demo.js"></script>
+<script src="analytics.js"></script>
 <script>
 // Auto-resolve download links from the latest GitHub release so the website
 // never goes stale when a new version ships.

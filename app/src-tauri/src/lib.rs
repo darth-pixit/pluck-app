@@ -1,5 +1,6 @@
 mod history;
 mod selection;
+mod settings;
 
 use history::{Database, HistoryItem};
 use selection::{
@@ -491,6 +492,8 @@ pub fn run() {
             open_accessibility_settings,
             open_input_monitoring_settings,
             invoke_paste,
+            settings::get_settings,
+            settings::set_settings,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
