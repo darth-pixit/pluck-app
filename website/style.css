@@ -296,6 +296,141 @@ a:hover { text-decoration: underline; }
 
 .stats-quip strong { color: var(--accent-3); font-weight: 700; }
 
+/* ── Download modal ──────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 6, 5, 0.72);
+  backdrop-filter: blur(6px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 300;
+  opacity: 0;
+  transition: opacity .18s;
+}
+
+.modal-backdrop.show {
+  display: flex;
+  opacity: 1;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid rgba(252,76,2,.25);
+  border-radius: var(--radius);
+  padding: 32px 28px 28px;
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(252,76,2,.08);
+  text-align: center;
+  transform: translateY(8px);
+  transition: transform .18s;
+}
+
+.modal-backdrop.show .modal { transform: translateY(0); }
+
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px 10px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+}
+.modal-close:hover { color: var(--text); background: rgba(255,255,255,.06); }
+
+.modal-icon {
+  font-size: 28px;
+  color: var(--accent-2);
+  margin-bottom: 8px;
+}
+
+.modal h3 {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  margin-bottom: 6px;
+}
+
+.modal-sub {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 20px;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-field span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.modal-field input,
+.modal-field select {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color .15s, background .15s;
+  width: 100%;
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+  outline: none;
+  border-color: rgba(252,76,2,.55);
+  background: rgba(255,255,255,.06);
+}
+
+.modal-field select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23ffffff80' d='M6 8L0 0h12z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.modal-submit {
+  width: 100%;
+  margin-top: 4px;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.modal-error {
+  color: #ff7a59;
+  font-size: 12.5px;
+  margin: 0;
+}
+
 /* ── Section shared ──────────────────────────────────────────────────── */
 .section-title {
   font-size: clamp(26px, 4vw, 40px);

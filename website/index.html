@@ -182,7 +182,7 @@
 <!-- ─── DOWNLOAD ──────────────────────────────────────────────────────────── -->
 <section class="download" id="download">
   <h2 class="section-title">Desktop App</h2>
-  <p class="download-sub">Free. Open source. No email required. Works in every app, everywhere.</p>
+  <p class="download-sub">Free. Open source. Works in every app, everywhere.</p>
 
   <div class="platform-cards">
     <div class="platform-card" id="card-mac">
@@ -221,6 +221,39 @@
     <br>All releases on <a href="https://github.com/darth-pixit/pluck-app/releases" target="_blank" rel="noopener">GitHub →</a>
   </p>
 </section>
+
+<!-- ─── DOWNLOAD MODAL ────────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="dl-modal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dl-modal-title">
+    <button class="modal-close" id="dl-modal-close" aria-label="Close">×</button>
+    <div class="modal-icon">✦</div>
+    <h3 id="dl-modal-title">One quick thing before you pluk</h3>
+    <p class="modal-sub">We'll send your download link and the occasional release note. No spam, unsubscribe anytime.</p>
+    <form id="dl-form" class="modal-form" novalidate>
+      <label class="modal-field">
+        <span>Work email</span>
+        <input type="email" id="dl-email" required placeholder="you@company.com" autocomplete="email">
+      </label>
+      <label class="modal-field">
+        <span>What best describes you?</span>
+        <select id="dl-persona" required>
+          <option value="" disabled selected>Pick your persona…</option>
+          <option value="engineer">Engineer / Developer</option>
+          <option value="designer">Designer</option>
+          <option value="pm">Product / Project Manager</option>
+          <option value="researcher">Researcher / Analyst</option>
+          <option value="writer">Writer / Editor</option>
+          <option value="marketing">Marketing / Sales</option>
+          <option value="support">Customer Support</option>
+          <option value="student">Student</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <button type="submit" class="btn-primary modal-submit">Start download</button>
+      <p class="modal-error" id="dl-error" hidden></p>
+    </form>
+  </div>
+</div>
 
 <!-- ─── FOOTER ────────────────────────────────────────────────────────────── -->
 <footer class="footer">
