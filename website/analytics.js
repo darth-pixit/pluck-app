@@ -57,7 +57,10 @@
     page_view:               ["path", "referrer_host", "viewport_w"],
     scroll_depth:            ["percent"],
     download_clicked:        ["platform", "cta_location"],
-    extension_link_clicked:  ["browser", "cta_location"],
+    download_modal_opened:   ["platform"],
+    download_modal_closed:   ["platform", "via"],
+    download_form_submitted: ["platform", "persona"],
+    download_form_invalid:   ["reason"],
     github_link_clicked:     ["link_target"],
     nav_clicked:             ["target"],
     demo_interacted:         ["selection_chars_bucket"],
@@ -227,11 +230,6 @@
 
     if (el.classList.contains("btn-download") || /releases/.test(href)) {
       track("download_clicked", { platform: platformFromEl(el), cta_location: ctaLocation(el) });
-    }
-    if (el.id === "ext-chrome" || /chrome/i.test(el.textContent)) {
-      track("extension_link_clicked", { browser: "chrome", cta_location: ctaLocation(el) });
-    } else if (el.id === "ext-firefox" || /firefox/i.test(el.textContent)) {
-      track("extension_link_clicked", { browser: "firefox", cta_location: ctaLocation(el) });
     }
     if (/github\.com/.test(href)) {
       track("github_link_clicked", { link_target: /releases/.test(href) ? "releases" : (/issues/.test(href) ? "issues" : "repo") });
