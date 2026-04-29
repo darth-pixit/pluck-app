@@ -32,7 +32,7 @@
     app_launched:            ["cold_start", "since_last_launch_ms"],
     analytics_opted_out:     [],
     analytics_opted_in:      [],
-    selection_captured:      ["char_count_bucket", "was_drag", "was_multi_click", "scheme"],
+    selection_captured:      ["char_count_bucket", "was_drag", "was_multi_click", "scheme", "content_kind"],
     selection_capture_failed:["reason"],
     toast_shown:             ["char_count_bucket"],
     popup_opened:            ["item_count"],

@@ -84,6 +84,48 @@
       .replace(/"/g, "&quot;");
   }
 
+  // ── Content-kind classifier ───────────────────────────────────────────────
+  // Returns a coarse label only ("url" | "json" | "email" | "color" | "code"
+  // | "text"). The label is the ONLY thing derived from the selection that
+  // ever leaves the device; the original text is never sent.
+
+  var URL_RE   = /^(https?:\/\/|ftp:\/\/)\S+$/i;
+  var WWW_RE   = /^www\.[^\s.]+\.\S+$/i;
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  var HEX_RE   = /^#?([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+  // Cap JSON.parse — selections can be megabytes of log output.
+  var JSON_PARSE_MAX = 500000;
+
+  function looksLikeCode(s) {
+    var lines = s.split("\n");
+    if (lines.length < 2) return false;
+    var codey = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (/^(\s{2,}|\t)/.test(l) ||
+          /[;{}]\s*$/.test(l) ||
+          /^\s*(import|from|function|const|let|var|class|def|return|if|for|while|public|private)\b/.test(l)) {
+        codey++;
+      }
+    }
+    return codey / lines.length >= 0.4;
+  }
+
+  function classify(text) {
+    var trimmed = text.trim();
+    if (!trimmed) return "text";
+    if (HEX_RE.test(trimmed)) return "color";
+    if (URL_RE.test(trimmed) || WWW_RE.test(trimmed)) return "url";
+    if (EMAIL_RE.test(trimmed)) return "email";
+    var first = trimmed[0], last = trimmed[trimmed.length - 1];
+    if (trimmed.length <= JSON_PARSE_MAX &&
+        ((first === "{" && last === "}") || (first === "[" && last === "]"))) {
+      try { JSON.parse(trimmed); return "json"; } catch (_) {}
+    }
+    if (looksLikeCode(text)) return "code";
+    return "text";
+  }
+
   // ── Mouse tracking ────────────────────────────────────────────────────────
 
   document.addEventListener("mousedown", (e) => {
@@ -132,7 +174,8 @@
               char_count_bucket: window.Pluks.bucket(text.length),
               was_drag: isDrag,
               was_multi_click: isMultiClick,
-              scheme: location.protocol.replace(":", "")
+              scheme: location.protocol.replace(":", ""),
+              content_kind: classify(text)
             });
             // Sample toast event ~25% to keep volume down.
             if (Math.random() < 0.25) {
