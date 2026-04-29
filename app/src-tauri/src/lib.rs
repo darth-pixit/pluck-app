@@ -245,10 +245,28 @@ fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
     }
 }
 
+// On Windows & Linux the overlay behavior is handled declaratively by
+// tauri.conf.json (alwaysOnTop, skipTaskbar, visibleOnAllWorkspaces,
+// decorations:false, transparent:true). We re-assert always-on-top here as
+// a belt-and-suspenders against window managers that strip the hint when
+// the window is initially hidden.
+//
+// Caveats outside our control:
+//   - Linux/X11 transparency requires a compositing WM; without one the
+//     panel renders with an opaque background.
+//   - Wayland compositors typically refuse always-on-top from arbitrary
+//     clients; the panel will still appear, just not stay above fullscreen.
+//   - Win32 doesn't have macOS's per-Space "join all spaces" concept;
+//     alwaysOnTop is the closest equivalent.
 #[cfg(not(target_os = "macos"))]
-fn configure_overlay_window<R: Runtime>(_window: &WebviewWindow<R>) {}
+fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_skip_taskbar(true);
+}
 #[cfg(not(target_os = "macos"))]
-fn order_front_regardless<R: Runtime>(_window: &WebviewWindow<R>) {}
+fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.set_focus();
+}
 
 fn show_history_window<R: Runtime>(window: &WebviewWindow<R>, keyboard: bool) {
     let _ = window.center();
@@ -346,6 +364,10 @@ fn start_copy_processor(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // The MacosLauncher arg only takes effect on macOS — on Windows the
+        // plugin writes a registry Run entry, on Linux it drops a .desktop
+        // autostart file. Same call works cross-platform; only the macOS
+        // codepath consults this enum.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -385,10 +407,15 @@ pub fn run() {
             // ── Tray ─────────────────────────────────────────────────────
             let toggle_item =
                 MenuItem::with_id(app, TRAY_TOGGLE, TRAY_LABEL_DISABLE, true, None::<&str>)?;
+            let history_label = if cfg!(target_os = "macos") {
+                "Show / Hide History (⌘⇧V)"
+            } else {
+                "Show / Hide History (Ctrl+Shift+V)"
+            };
             let history_item = MenuItem::with_id(
                 app,
                 TRAY_HISTORY,
-                "Show / Hide History (⌘⇧V)",
+                history_label,
                 true,
                 None::<&str>,
             )?;

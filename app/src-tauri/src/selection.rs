@@ -42,6 +42,11 @@ pub fn input_monitoring_granted() -> bool {
     unsafe { IOHIDCheckAccess(1) == 0 }
 }
 
+// Windows & Linux don't gate global input behind a per-app permission the way
+// macOS does (Accessibility / Input Monitoring). The OS either allows global
+// hooks for any process or it doesn't (Wayland under most compositors blocks
+// them entirely). We report "granted" so the onboarding screen doesn't appear;
+// the listener itself logs if `rdev::listen` fails.
 #[cfg(not(target_os = "macos"))]
 pub fn ax_is_trusted() -> bool { true }
 
@@ -88,10 +93,97 @@ pub fn activate_pid(pid: i32) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn frontmost_pid() -> Option<i32> { None }
-#[cfg(not(target_os = "macos"))]
-pub fn activate_pid(_pid: i32) {}
+// ── Windows: frontmost-app tracking via Win32 ─────────────────────────────────
+
+#[cfg(target_os = "windows")]
+pub fn frontmost_pid() -> Option<i32> {
+    use std::ffi::c_void;
+    extern "system" {
+        fn GetForegroundWindow() -> *mut c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut c_void, lpdw_process_id: *mut u32) -> u32;
+    }
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() { return None; }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid > 0 { Some(pid as i32) } else { None }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn activate_pid(pid: i32) {
+    use std::ffi::c_void;
+    extern "system" {
+        fn EnumWindows(cb: extern "system" fn(*mut c_void, isize) -> i32, lparam: isize) -> i32;
+        fn GetWindowThreadProcessId(hwnd: *mut c_void, lpdw_process_id: *mut u32) -> u32;
+        fn IsWindowVisible(hwnd: *mut c_void) -> i32;
+        fn SetForegroundWindow(hwnd: *mut c_void) -> i32;
+        fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
+        fn IsIconic(hwnd: *mut c_void) -> i32;
+    }
+    const SW_RESTORE: i32 = 9;
+
+    struct Search { target_pid: u32, found: *mut c_void }
+
+    extern "system" fn enum_cb(hwnd: *mut c_void, lparam: isize) -> i32 {
+        unsafe {
+            let s = &mut *(lparam as *mut Search);
+            let mut p: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut p);
+            if p == s.target_pid && IsWindowVisible(hwnd) != 0 {
+                s.found = hwnd;
+                return 0;
+            }
+            1
+        }
+    }
+
+    let mut search = Search { target_pid: pid as u32, found: std::ptr::null_mut() };
+    unsafe {
+        EnumWindows(enum_cb, &mut search as *mut _ as isize);
+        if search.found.is_null() { return; }
+        if IsIconic(search.found) != 0 {
+            ShowWindow(search.found, SW_RESTORE);
+        }
+        // Note: SetForegroundWindow may be blocked by the Win32 foreground
+        // lock if our process isn't currently allowed to take focus. The
+        // panel typically WAS frontmost, which lets this succeed; if the lock
+        // bites in practice we can mitigate with AllowSetForegroundWindow
+        // from the panel just before hiding it.
+        SetForegroundWindow(search.found);
+    }
+}
+
+// ── Linux: frontmost-app tracking via xdotool (X11) ───────────────────────────
+//
+// Wayland sessions block global window-management APIs from arbitrary
+// processes; on those, both calls degrade to None / no-op and paste lands
+// wherever the compositor places focus next.
+
+#[cfg(target_os = "linux")]
+pub fn frontmost_pid() -> Option<i32> {
+    let out = std::process::Command::new("xdotool")
+        .args(["getactivewindow", "getwindowpid"])
+        .output()
+        .ok()?;
+    if !out.status.success() { return None; }
+    std::str::from_utf8(&out.stdout).ok()?.trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+pub fn activate_pid(pid: i32) {
+    let Ok(out) = std::process::Command::new("xdotool")
+        .args(["search", "--pid", &pid.to_string()])
+        .output()
+    else { return };
+    if !out.status.success() { return; }
+    let Ok(text) = std::str::from_utf8(&out.stdout) else { return };
+    let Some(wid) = text.lines().next() else { return };
+    let _ = std::process::Command::new("xdotool")
+        .args(["windowactivate", "--sync", wid])
+        .status();
+}
 
 // ── macOS: CGEvent FFI shared between cursor_pos, key sim, and the tap ─────────
 
@@ -117,9 +209,6 @@ fn cursor_pos() -> (f64, f64) {
         (pt.x, pt.y)
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn cursor_pos() -> (f64, f64) { (0.0, 0.0) }
 
 // ── macOS: keyboard simulation via CGEvent ────────────────────────────────────
 
@@ -329,6 +418,87 @@ mod mac_tap {
     }
 }
 
+// ── Windows & Linux: rdev-based input listener ────────────────────────────────
+//
+// Mirrors the macOS CGEventTap behavior: emits SelectionSignal on the same
+// gestures (mouse drag, double/triple click, Ctrl+A). rdev surfaces global
+// input events on Win32 (low-level keyboard/mouse hooks) and X11 (XRecord).
+// On Wayland this returns Err immediately and the listener thread exits;
+// the rest of the app keeps working as a manual clipboard manager.
+
+#[cfg(not(target_os = "macos"))]
+mod rdev_listener {
+    use super::*;
+    use rdev::{listen, Button, Event, EventType, Key};
+
+    pub fn run(tx: mpsc::SyncSender<SelectionSignal>) {
+        let mut press_x = 0.0_f64;
+        let mut press_y = 0.0_f64;
+        let mut cur_x = 0.0_f64;
+        let mut cur_y = 0.0_f64;
+        let mut button_down = false;
+        let mut last_release = Instant::now() - Duration::from_secs(10);
+        // rdev doesn't surface modifier state on its events, so we track each
+        // modifier ourselves by watching its KeyPress / KeyRelease.
+        let mut ctrl = false;
+        let mut shift = false;
+        let mut alt = false;
+        let mut meta = false;
+
+        let cb = move |ev: Event| match ev.event_type {
+            EventType::MouseMove { x, y } => { cur_x = x; cur_y = y; }
+            EventType::ButtonPress(Button::Left) => {
+                press_x = cur_x;
+                press_y = cur_y;
+                button_down = true;
+            }
+            EventType::ButtonRelease(Button::Left) => {
+                if !button_down { return; }
+                button_down = false;
+                let dx = (cur_x - press_x).abs();
+                let dy = (cur_y - press_y).abs();
+                let gap = last_release.elapsed().as_millis();
+                let is_drag = dx > DRAG_PIXEL_THRESHOLD || dy > DRAG_PIXEL_THRESHOLD;
+                let is_multi = !is_drag
+                    && gap > MULTI_CLICK_MIN_GAP_MS
+                    && gap < MULTI_CLICK_MAX_GAP_MS;
+                last_release = if is_drag {
+                    Instant::now() - Duration::from_secs(10)
+                } else {
+                    Instant::now()
+                };
+                if is_drag || is_multi {
+                    let _ = tx.try_send(SelectionSignal);
+                }
+            }
+            EventType::KeyPress(k) => match k {
+                Key::ControlLeft | Key::ControlRight => ctrl = true,
+                Key::ShiftLeft | Key::ShiftRight => shift = true,
+                Key::Alt | Key::AltGr => alt = true,
+                Key::MetaLeft | Key::MetaRight => meta = true,
+                Key::KeyA => {
+                    if ctrl && !shift && !alt && !meta {
+                        let _ = tx.try_send(SelectionSignal);
+                    }
+                }
+                _ => {}
+            },
+            EventType::KeyRelease(k) => match k {
+                Key::ControlLeft | Key::ControlRight => ctrl = false,
+                Key::ShiftLeft | Key::ShiftRight => shift = false,
+                Key::Alt | Key::AltGr => alt = false,
+                Key::MetaLeft | Key::MetaRight => meta = false,
+                _ => {}
+            },
+            _ => {}
+        };
+
+        if let Err(e) = listen(cb) {
+            eprintln!("[pluks] rdev listen failed (Wayland or missing X server?): {:?}", e);
+        }
+    }
+}
+
 pub fn start_listener(tx: mpsc::SyncSender<SelectionSignal>) {
     thread::spawn(move || {
         loop {
@@ -342,12 +512,7 @@ pub fn start_listener(tx: mpsc::SyncSender<SelectionSignal>) {
         mac_tap::run(tx);
 
         #[cfg(not(target_os = "macos"))]
-        {
-            // Non-macOS: fall back to a polling no-op. Pluks is mac-first; other
-            // platforms can wire up their own listener here.
-            let _ = tx;
-            loop { thread::sleep(Duration::from_secs(60)); }
-        }
+        rdev_listener::run(tx);
     });
 }
 

@@ -11,6 +11,25 @@ import "./index.css";
 // Direct Tauri window API — never goes through Rust invoke, always reliable.
 const hideWindow = () => getCurrentWindow().hide();
 
+// Platform detection (synchronous, fine for static UI/keybinding choices).
+// userAgentData.platform is the modern source; navigator.platform is the
+// fallback that still works on every browser engine Tauri ships with.
+const PLATFORM = (
+  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ||
+  navigator.platform ||
+  ""
+).toLowerCase();
+const IS_MAC = PLATFORM.includes("mac");
+// On macOS the keyboard-mode trigger is Cmd (KeyboardEvent.key === "Meta").
+// On Windows/Linux the global shortcut resolves to Ctrl, so the matching
+// release key is "Control".
+const RELEASE_KEY = IS_MAC ? "Meta" : "Control";
+const SHORTCUT_HINT = IS_MAC ? "⌘⇧V" : "Ctrl+Shift+V";
+
+if (typeof document !== "undefined") {
+  document.body.classList.add(IS_MAC ? "platform-mac" : "platform-other");
+}
+
 // 100 ms guard against the shortcut's own Cmd-release that fires right after the
 // global shortcut activates the panel.
 const KEYBOARD_OPEN_DEBOUNCE_MS = 100;
@@ -213,7 +232,7 @@ export default function App() {
   useEffect(() => {
     if (!keyboardMode) return;
     const handleKeyUp = async (e: KeyboardEvent) => {
-      if (e.key !== "Meta") return;
+      if (e.key !== RELEASE_KEY) return;
       // Ignore the key-up that fires right after opening (the shortcut's own release).
       if (Date.now() - keyboardModeTime.current < KEYBOARD_OPEN_DEBOUNCE_MS) return;
       const id = activeItemIdRef.current;
@@ -386,7 +405,7 @@ export default function App() {
 
       <div className="panel-footer">
         <button className="btn-clear" onClick={handleClear}>Clear all</button>
-        <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close</span>
+        <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close · {SHORTCUT_HINT} toggle</span>
       </div>
     </div>
   );
