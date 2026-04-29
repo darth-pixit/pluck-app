@@ -16,6 +16,9 @@ const APP_VERSION  = (import.meta.env.VITE_APP_VERSION  as string) || "0.0.0";
 
 const isRealKey = (s: string) => !!s && !s.includes("PLACEHOLDER");
 
+if (!isRealKey(POSTHOG_KEY)) console.warn("[pluks-app] PostHog disabled — placeholder key in use");
+if (!isRealKey(SENTRY_DSN))  console.warn("[pluks-app] Sentry disabled — placeholder DSN in use");
+
 // Allowed property keys per event. `track()` drops anything not on the list.
 const SCHEMA: Record<string, readonly string[]> = {
   app_installed:                 [],

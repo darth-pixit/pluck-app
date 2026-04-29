@@ -11,12 +11,14 @@
 (function () {
   "use strict";
 
-  var POSTHOG_KEY  = "phc_PLACEHOLDER_REPLACE_AT_DEPLOY";
+  var POSTHOG_KEY  = "phc_rAzNboDZLDXo4ePmSUaHGPF7aCbinStawno6HYGTgEte";
   var POSTHOG_HOST = "https://us.i.posthog.com";
   var SENTRY_DSN   = "https://PLACEHOLDER_REPLACE_AT_DEPLOY@o0.ingest.sentry.io/0";
   var RELEASE      = "pluks-web@2026.04";
 
   function isRealKey(s) { return !!s && s.indexOf("PLACEHOLDER") === -1; }
+  if (!isRealKey(POSTHOG_KEY)) console.warn("[pluks] PostHog disabled — placeholder key in use");
+  if (!isRealKey(SENTRY_DSN))  console.warn("[pluks] Sentry disabled — placeholder DSN in use");
 
   var KEY_OPT_OUT = "pluks_opt_out";
   var KEY_ANON    = "pluks_anon_id";
