@@ -55,13 +55,15 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste] = await Promise.all([
 
     hogql(`
       SELECT
         event,
-        countIf(toDate(timestamp) = today())     AS today,
-        countIf(toDate(timestamp) = yesterday())  AS yesterday
+        countIf(toDate(timestamp) = today())              AS today,
+        countIf(toDate(timestamp) = yesterday())           AS yesterday,
+        uniqIf(distinct_id, toDate(timestamp) = today())     AS users_today,
+        uniqIf(distinct_id, toDate(timestamp) = yesterday()) AS users_yesterday
       FROM events
       WHERE event IN ('app_installed','app_launched','app_updated')
         AND timestamp >= now() - INTERVAL 2 DAY
@@ -132,18 +134,9 @@ async function fetchMetrics() {
       LIMIT 6
     `),
 
-    hogql(`
-      SELECT
-        uniqIf(distinct_id, toDate(timestamp) = today())     AS dau_today,
-        uniqIf(distinct_id, toDate(timestamp) = yesterday())  AS dau_yesterday
-      FROM events
-      WHERE event = 'app_launched'
-        AND timestamp >= now() - INTERVAL 2 DAY
-    `),
-
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -165,7 +158,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -187,8 +180,9 @@ function buildHtml(metrics) {
   const tauriErrs  = rowFromData(usage, 'error_tauri_invoke_failed');
   const rustPanics = rowFromData(usage, 'error_rust_panic');
 
-  const dauToday = dau[0]?.dau_today ?? 0;
-  const dauYest  = dau[0]?.dau_yesterday ?? 0;
+  const launchRow = traffic.find(r => r.event === 'app_launched') ?? {};
+  const dauToday = launchRow.users_today ?? 0;
+  const dauYest  = launchRow.users_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
 
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
