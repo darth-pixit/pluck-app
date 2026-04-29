@@ -123,7 +123,7 @@ const TOUR_STEPS: TourStep[] = [
   },
 ];
 
-function OnboardingTour({ onDone }: { onDone: () => void }) {
+function OnboardingTour({ onDone }: { onDone: (reason: "skipped" | "completed") => void }) {
   const [step, setStep] = useState(0);
   const last = step === TOUR_STEPS.length - 1;
   const current = TOUR_STEPS[step];
@@ -131,19 +131,20 @@ function OnboardingTour({ onDone }: { onDone: () => void }) {
     <div className="tour-overlay" role="dialog" aria-modal="true" aria-label="Pluks onboarding">
       <div className="tour-card">
         <div className="tour-progress">
-          {TOUR_STEPS.map((_, i) => (
-            <span key={i} className={`tour-dot ${i === step ? "active" : i < step ? "done" : ""}`} />
-          ))}
+          {TOUR_STEPS.map((_, i) => {
+            const cls = i === step ? "active" : i < step ? "done" : "";
+            return <span key={i} className={`tour-dot ${cls}`} />;
+          })}
         </div>
         <h2 className="tour-title">{current.title}</h2>
         <p className="tour-body">{current.body}</p>
         <div className="tour-actions">
-          <button className="tour-skip" onClick={onDone}>Skip</button>
+          <button className="tour-skip" onClick={() => onDone("skipped")}>Skip</button>
           <button
             className="tour-next"
             onClick={() => {
               track("onboarding_step_advanced", { step });
-              if (last) onDone();
+              if (last) onDone("completed");
               else setStep(s => s + 1);
             }}
           >
@@ -169,7 +170,8 @@ export default function App() {
   // When true: opened via CMD+Shift+V; releasing CMD auto-pastes the active item.
   const [keyboardMode, setKeyboardMode]             = useState(false);
   const [showTour, setShowTour]                     = useState(false);
-  const wasInSetupRef                               = useRef(false);
+  // null = before-first-run sentinel; flips to a boolean after the initial pass.
+  const wasInSetupRef                               = useRef<boolean | null>(null);
   const keyboardModeTime                            = useRef(0);
   const lastShownAt                                 = useRef(0);
   const activeItemIdRef                             = useRef<number | null>(null);
@@ -226,29 +228,27 @@ export default function App() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [needsSetup, checkPermissions]);
 
-  // Drop always-on-top while the setup screen is showing so the panel doesn't
-  // float over System Settings while the user grants permissions. Restore it
-  // once setup is done so the overlay behavior returns. Also kick off the
-  // onboarding tour the first time the user transitions out of setup.
+  // Drop always-on-top while setup is showing so the panel doesn't float over
+  // System Settings during permission grants; restore once setup is done.
+  // Skip the very first run — at mount we haven't verified perms yet, and
+  // pre-empting the Rust-side configure_overlay_window default would briefly
+  // demote the panel for already-permissioned users.
   useEffect(() => {
-    const win = getCurrentWindow();
-    win.setAlwaysOnTop(!needsSetup).catch(() => {});
-    if (wasInSetupRef.current && !needsSetup) {
-      try {
-        if (!localStorage.getItem(ONBOARDING_KEY)) {
-          setShowTour(true);
-          track("onboarding_started", {});
-        }
-      } catch {
-        setShowTour(true);
-      }
+    if (wasInSetupRef.current === null) {
+      wasInSetupRef.current = needsSetup;
+      return;
+    }
+    getCurrentWindow().setAlwaysOnTop(!needsSetup).catch(console.warn);
+    if (wasInSetupRef.current && !needsSetup && !localStorage.getItem(ONBOARDING_KEY)) {
+      setShowTour(true);
+      track("onboarding_started", {});
     }
     wasInSetupRef.current = needsSetup;
   }, [needsSetup]);
 
-  const dismissTour = useCallback(() => {
-    try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* localStorage unavailable */ }
-    track("onboarding_completed", {});
+  const dismissTour = useCallback((reason: "skipped" | "completed") => {
+    try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* private mode / quota */ }
+    track("onboarding_completed", { dismiss_reason: reason });
     setShowTour(false);
   }, []);
 
@@ -428,12 +428,14 @@ export default function App() {
             <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
           </div>
           <span className="brand">pluks</span>
-          <button
-            className="setup-dismiss"
-            title="Hide window — re-open from the menu-bar icon"
-            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
-            onClick={hideWindow}
-          >Hide ✕</button>
+          {!IS_MAC && (
+            <button
+              className="setup-dismiss"
+              title="Hide window — re-open from the menu-bar icon"
+              onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={hideWindow}
+            >Hide ✕</button>
+          )}
         </div>
         <SetupScreen hasAccessibility={hasAccessibility} hasInputMonitoring={hasInputMonitoring} onCheck={checkPermissions} />
       </div>

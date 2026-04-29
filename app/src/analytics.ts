@@ -40,6 +40,10 @@ const SCHEMA: Record<string, readonly string[]> = {
   permission_granted:            ["permission", "seconds_since_first_seen"],
   permission_denied_or_skipped:  ["permission"],
 
+  onboarding_started:            [],
+  onboarding_step_advanced:      ["step"],
+  onboarding_completed:          ["dismiss_reason"],
+
   history_loaded:                ["item_count", "load_ms"],
   history_item_clicked:          ["position", "kind", "char_count_bucket"],
   history_item_pasted_keyboard:  ["position", "kind"],
