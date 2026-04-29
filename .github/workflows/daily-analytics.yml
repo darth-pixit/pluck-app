@@ -1,0 +1,36 @@
+name: Daily Analytics Digest
+
+on:
+  schedule:
+    # 03:30 UTC = 09:00 IST every day
+    - cron: '30 3 * * *'
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+jobs:
+  send-digest:
+    name: Send Pluks Analytics Email
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install nodemailer
+        working-directory: scripts
+
+      - name: Run analytics digest
+        env:
+          POSTHOG_PERSONAL_API_KEY: ${{ secrets.POSTHOG_PERSONAL_API_KEY }}
+          POSTHOG_PROJECT_ID:       ${{ secrets.POSTHOG_PROJECT_ID }}
+          GMAIL_USER:               ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:       ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL:          parth.dixit@alumni.iitd.ac.in
+        run: node analytics-digest.mjs
+        working-directory: scripts
