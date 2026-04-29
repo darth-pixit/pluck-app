@@ -3,6 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import HistoryPanel from "./HistoryPanel";
+import PreferencesScreen from "./PreferencesScreen";
+import { bucket, safeInvoke, track } from "./analytics";
+import { detect } from "./detectors";
 import "./index.css";
 
 // Direct Tauri window API — never goes through Rust invoke, always reliable.
@@ -43,7 +46,11 @@ function SetupScreen({
             <div className="step-desc">Lets Pluks simulate Cmd+C to copy your selection.</div>
           </div>
           {!hasAccessibility && (
-            <button className="step-btn" onClick={() => { invoke("open_accessibility_settings"); setTimeout(onCheck, 3000); }}>Grant →</button>
+            <button className="step-btn" onClick={() => {
+              track("permission_grant_clicked", { permission: "accessibility" });
+              invoke("open_accessibility_settings");
+              setTimeout(onCheck, 3000);
+            }}>Grant →</button>
           )}
         </div>
         <div className={`setup-step ${hasInputMonitoring ? "done" : "pending"}`}>
@@ -53,11 +60,19 @@ function SetupScreen({
             <div className="step-desc">Lets Pluks detect when you select text with your mouse.</div>
           </div>
           {!hasInputMonitoring && (
-            <button className="step-btn" onClick={() => { invoke("open_input_monitoring_settings"); setTimeout(onCheck, 3000); }}>Grant →</button>
+            <button className="step-btn" onClick={() => {
+              track("permission_grant_clicked", { permission: "input_monitoring" });
+              invoke("open_input_monitoring_settings");
+              setTimeout(onCheck, 3000);
+            }}>Grant →</button>
           )}
         </div>
       </div>
       <p className="setup-hint">After granting each permission, come back here — this screen updates automatically.</p>
+      <p className="setup-privacy-note">
+        Pluks sends anonymous usage stats and crash reports to help us improve.
+        Manage in <strong>⚙ Preferences</strong> after setup.
+      </p>
     </div>
   );
 }
@@ -72,6 +87,7 @@ export default function App() {
   // showing the main panel without permissions would hand the user a broken UI.
   const [hasAccessibility, setHasAccessibility]     = useState(false);
   const [hasInputMonitoring, setHasInputMonitoring] = useState(false);
+  const [prefsOpen, setPrefsOpen]                   = useState(false);
   // When true: opened via CMD+Shift+V; releasing CMD auto-pastes the active item.
   const [keyboardMode, setKeyboardMode]             = useState(false);
   const keyboardModeTime                            = useRef(0);
@@ -79,16 +95,44 @@ export default function App() {
   const activeItemIdRef                             = useRef<number | null>(null);
   const pollRef                                     = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchRef                                   = useRef<HTMLInputElement>(null);
+  const prevPermsRef                                = useRef({ ax: false, im: false });
+  const firstSeenRef                                = useRef<number>(Date.now());
+  const searchDebounceRef                           = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkPermissions = useCallback(() => {
-    invoke<boolean>("check_accessibility").then(setHasAccessibility).catch(() => setHasAccessibility(false));
-    invoke<boolean>("check_input_monitoring").then(setHasInputMonitoring).catch(() => setHasInputMonitoring(false));
+    invoke<boolean>("check_accessibility").then(v => {
+      setHasAccessibility(v);
+      if (v && !prevPermsRef.current.ax) {
+        track("permission_granted", {
+          permission: "accessibility",
+          seconds_since_first_seen: Math.round((Date.now() - firstSeenRef.current) / 1000)
+        });
+      }
+      prevPermsRef.current.ax = v;
+    }).catch(() => setHasAccessibility(false));
+    invoke<boolean>("check_input_monitoring").then(v => {
+      setHasInputMonitoring(v);
+      if (v && !prevPermsRef.current.im) {
+        track("permission_granted", {
+          permission: "input_monitoring",
+          seconds_since_first_seen: Math.round((Date.now() - firstSeenRef.current) / 1000)
+        });
+      }
+      prevPermsRef.current.im = v;
+    }).catch(() => setHasInputMonitoring(false));
   }, []);
 
   const needsSetup = !hasAccessibility || !hasInputMonitoring;
 
   useEffect(() => {
-    invoke<HistoryItem[]>("get_history").then(setItems).catch(console.error);
+    const t0 = performance.now();
+    safeInvoke<HistoryItem[]>("get_history").then(rows => {
+      setItems(rows);
+      track("history_loaded", {
+        item_count: rows.length,
+        load_ms: Math.round(performance.now() - t0)
+      });
+    }).catch(console.error);
     checkPermissions();
   }, [checkPermissions]);
 
@@ -113,10 +157,15 @@ export default function App() {
     win.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         lastShownAt.current = Date.now();
+        track("panel_opened", { trigger: "focus_change", had_focus_target: true });
         checkPermissions();
         searchRef.current?.focus();
       } else if (!needsSetup) {
         if (Date.now() - lastShownAt.current < BLUR_HIDE_GRACE_MS) return;
+        track("panel_closed", {
+          dismiss_reason: "blur",
+          open_duration_ms: Math.max(0, Date.now() - lastShownAt.current)
+        });
         setKeyboardMode(false);
         win.hide();
       }
@@ -155,6 +204,7 @@ export default function App() {
     const unlisten = listen("keyboard-open", () => {
       setKeyboardMode(true);
       keyboardModeTime.current = Date.now();
+      track("panel_opened", { trigger: "shortcut", had_focus_target: true });
       searchRef.current?.focus();
     });
     return () => { unlisten.then(fn => fn()); };
@@ -170,20 +220,35 @@ export default function App() {
       const id = activeItemIdRef.current;
       setKeyboardMode(false);
       if (id !== null) {
-        await invoke("copy_item", { id });
+        const item = items.find(i => i.id === id);
+        if (item) {
+          const det = detect(item.content);
+          track("history_item_pasted_keyboard", {
+            position: items.findIndex(i => i.id === id),
+            kind: det?.kind || "unknown"
+          });
+        }
+        await safeInvoke("copy_item", { id });
         await hideWindow();
         await new Promise(r => setTimeout(r, PASTE_FOCUS_RESTORE_MS));
-        await invoke("invoke_paste");
+        await safeInvoke("invoke_paste");
       }
     };
     window.addEventListener("keyup", handleKeyUp);
     return () => window.removeEventListener("keyup", handleKeyUp);
-  }, [keyboardMode]);
+  }, [keyboardMode, items]);
 
   // Escape always dismisses the panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setKeyboardMode(false); hideWindow(); }
+      if (e.key === "Escape") {
+        track("panel_closed", {
+          dismiss_reason: "escape",
+          open_duration_ms: Math.max(0, Date.now() - lastShownAt.current)
+        });
+        setKeyboardMode(false);
+        hideWindow();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -198,24 +263,53 @@ export default function App() {
   // restore focus to the previously-foreground app, then synthesize Cmd+V.
   const pasteVia = useCallback(async (cmd: string, args: Record<string, unknown>) => {
     setKeyboardMode(false);
-    await invoke(cmd, args);
+    await safeInvoke(cmd, args);
     await hideWindow();
     await new Promise(r => setTimeout(r, PASTE_FOCUS_RESTORE_MS));
-    await invoke("invoke_paste");
+    await safeInvoke("invoke_paste");
   }, []);
 
-  const handleCopy            = useCallback((id: number)    => pasteVia("copy_item", { id }),     [pasteVia]);
-  const handleCopyTransformed = useCallback((text: string)  => pasteVia("copy_text", { text }),   [pasteVia]);
+  const handleCopy = useCallback((id: number) => {
+    const item = items.find(i => i.id === id);
+    if (item) {
+      const det = detect(item.content);
+      track("history_item_clicked", {
+        position: items.findIndex(i => i.id === id),
+        kind: det?.kind || "unknown",
+        char_count_bucket: bucket(item.char_count)
+      });
+    }
+    return pasteVia("copy_item", { id });
+  }, [items, pasteVia]);
 
-  const handleDelete = useCallback(async (id: number) => {
-    const ok = await invoke<boolean>("delete_item", { id });
+  const handleCopyTransformed = useCallback((text: string, action_label: string, kind: string) => {
+    track("smart_paste_used", { kind, action_label });
+    return pasteVia("copy_text", { text });
+  }, [pasteVia]);
+
+  const handleDelete = useCallback(async (id: number, via: "keyboard" | "click") => {
+    track("history_item_deleted", { position: items.findIndex(i => i.id === id), via });
+    const ok = await safeInvoke<boolean>("delete_item", { id });
     if (ok) setItems(prev => prev.filter(i => i.id !== id));
-  }, []);
+  }, [items]);
 
   const handleClear = useCallback(async () => {
-    const ok = await invoke<boolean>("clear_history");
+    track("history_cleared", { item_count_before: items.length });
+    const ok = await safeInvoke<boolean>("clear_history");
     if (ok) setItems([]);
-  }, []);
+  }, [items.length]);
+
+  // Debounced search-event emission. UI filters synchronously below.
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!query.trim()) return;
+    searchDebounceRef.current = setTimeout(() => {
+      const q = query.trim().toLowerCase();
+      const result_count = items.filter(i => i.content.toLowerCase().includes(q)).length;
+      track("history_searched", { query_length_bucket: bucket(q.length), result_count });
+    }, 500);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [query, items]);
 
   const filtered = query.trim()
     ? items.filter(i => i.content.toLowerCase().includes(query.toLowerCase()))
@@ -235,6 +329,21 @@ export default function App() {
     );
   }
 
+  if (prefsOpen) {
+    return (
+      <div className="panel">
+        <div className="titlebar" data-tauri-drag-region>
+          <div className="traffic-lights">
+            <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
+          </div>
+          <span className="brand">pluks</span>
+          <button className="gear-btn active" title="Close preferences" onClick={() => setPrefsOpen(false)}>←</button>
+        </div>
+        <PreferencesScreen onClose={() => setPrefsOpen(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="panel">
       <div className="titlebar" data-tauri-drag-region>
@@ -243,6 +352,12 @@ export default function App() {
         </div>
         <span className="brand">pluks</span>
         <span className="count">{items.length} / 100</span>
+        <button
+          className="gear-btn"
+          title="Preferences"
+          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={() => setPrefsOpen(true)}
+        >⚙</button>
       </div>
 
       <div className="search-row">
@@ -266,6 +381,7 @@ export default function App() {
           onDelete={handleDelete}
           onActiveChange={id => { activeItemIdRef.current = id; }}
           onCopyTransformed={handleCopyTransformed}
+          onNavigate={(direction, from, to) => track("history_navigated_keyboard", { direction, from_index: from, to_index: to })}
         />
       )}
 

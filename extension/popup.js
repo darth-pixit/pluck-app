@@ -3,8 +3,17 @@
 const listEl = document.getElementById("list");
 const searchEl = document.getElementById("searchInput");
 const clearBtn = document.getElementById("clearBtn");
+const optOutEl = document.getElementById("optOut");
 
 let allHistory = [];
+
+function bucketLen(n) {
+  return (window.Pluks && window.Pluks.bucket) ? window.Pluks.bucket(n) : "unknown";
+}
+
+function track(event, props) {
+  try { if (window.Pluks) window.Pluks.track(event, props || {}); } catch (_) {}
+}
 
 function timeAgo(ts) {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -43,6 +52,7 @@ function render(items) {
     `;
 
     div.addEventListener("click", async () => {
+      track("popup_history_clicked", { position: idx, char_count_bucket: bucketLen((item.text || "").length) });
       try {
         await navigator.clipboard.writeText(item.text);
         div.classList.add("copied-flash");
@@ -90,10 +100,21 @@ function applyFilter(query) {
 chrome.storage.local.get("history", ({ history = [] }) => {
   allHistory = history;
   render(allHistory);
+  track("popup_opened", { item_count: allHistory.length });
 });
 
-// Live search
-searchEl.addEventListener("input", () => applyFilter(searchEl.value));
+// Live search (debounced for analytics; render immediately for UX)
+let searchTimer = null;
+searchEl.addEventListener("input", () => {
+  applyFilter(searchEl.value);
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const q = searchEl.value.trim();
+    if (!q) return;
+    const result_count = allHistory.filter((i) => i.text.toLowerCase().includes(q.toLowerCase())).length;
+    track("popup_searched", { query_length_bucket: bucketLen(q.length), result_count });
+  }, 500);
+});
 
 // Keyboard: Escape closes popup
 document.addEventListener("keydown", (e) => {
@@ -102,7 +123,21 @@ document.addEventListener("keydown", (e) => {
 
 // Clear all
 clearBtn.addEventListener("click", async () => {
+  const before = allHistory.length;
   await chrome.storage.local.set({ history: [] });
   allHistory = [];
   render([]);
+  track("popup_history_cleared", { item_count_before: before });
 });
+
+// ── Opt-out toggle ──────────────────────────────────────────────────────
+(async function () {
+  if (!window.Pluks || !optOutEl) return;
+  optOutEl.checked = await window.Pluks.isOptedOut();
+  optOutEl.addEventListener("change", async () => {
+    // Fire the opt-out event BEFORE flipping the flag — opt-in event fires
+    // after the flag is set so it actually goes out.
+    if (optOutEl.checked) track("analytics_opted_out", {});
+    await window.Pluks.setOptOut(optOutEl.checked);
+  });
+})();

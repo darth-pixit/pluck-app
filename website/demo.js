@@ -11,6 +11,8 @@
   if (!demoText || !toast || !toastText) return;
 
   let toastTimeout;
+  let demoFirstAt = 0;
+  let demoSelections = 0;
 
   function showToast(text) {
     const preview =
@@ -55,6 +57,22 @@
       }
 
       showToast(selectedText);
+
+      // Anonymous bucketed instrumentation — never sends the selected text.
+      try {
+        if (window.Pluks && window.Pluks.track) {
+          if (!demoFirstAt) demoFirstAt = Date.now();
+          demoSelections++;
+          window.Pluks.track("demo_interacted", {
+            selection_chars_bucket: window.Pluks.bucket(selectedText.length)
+          });
+          if (demoSelections === 3) {
+            window.Pluks.track("demo_completed", {
+              time_to_complete_ms: Date.now() - demoFirstAt
+            });
+          }
+        }
+      } catch (_) {}
     }, 10);
   });
 

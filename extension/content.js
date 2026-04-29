@@ -124,9 +124,34 @@
         // Notify background to save to history
         chrome.runtime.sendMessage({ type: "SELECTION", text });
         if (isMultiClick) clickCount = 0;
-      }).catch(() => {
+
+        // Anonymous instrumentation. Never sends `text`. Bucketed length only.
+        try {
+          if (window.Pluks) {
+            window.Pluks.track("selection_captured", {
+              char_count_bucket: window.Pluks.bucket(text.length),
+              was_drag: isDrag,
+              was_multi_click: isMultiClick,
+              scheme: location.protocol.replace(":", "")
+            });
+            // Sample toast event ~25% to keep volume down.
+            if (Math.random() < 0.25) {
+              window.Pluks.track("toast_shown", {
+                char_count_bucket: window.Pluks.bucket(text.length)
+              });
+            }
+          }
+        } catch (_) {}
+      }).catch((err) => {
         // Clipboard write blocked (e.g. some cross-origin frames)
-        // Silently ignore — no toast shown
+        try {
+          if (window.Pluks) {
+            var reason = "unknown";
+            if (err && /not allowed|denied|permission/i.test(err.message || "")) reason = "permission";
+            else if (window.top !== window) reason = "cross_origin";
+            window.Pluks.track("selection_capture_failed", { reason: reason });
+          }
+        } catch (_) {}
       });
     }, 30);
   }, true);

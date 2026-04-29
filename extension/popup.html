@@ -153,6 +153,33 @@
     .copied-flash {
       background: #1a2a1a !important;
     }
+
+    footer.popup-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 14px;
+      border-top: 1px solid #222;
+      font-size: 11px;
+      color: #666;
+      flex-shrink: 0;
+    }
+    footer.popup-footer label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    footer.popup-footer input[type="checkbox"] {
+      accent-color: #FC4C02;
+      cursor: pointer;
+    }
+    footer.popup-footer a {
+      color: #888;
+      text-decoration: none;
+    }
+    footer.popup-footer a:hover { color: #FC4C02; }
   </style>
 </head>
 <body>
@@ -166,6 +193,15 @@
   </div>
   <div class="list" id="list"></div>
 
+  <footer class="popup-footer">
+    <label title="Send anonymous usage stats and crash reports — helps us improve Pluks.">
+      <input type="checkbox" id="optOut"/> Don't send anonymous stats
+    </label>
+    <a href="https://pluks.app/privacy.html" target="_blank" rel="noopener">Privacy</a>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="analytics.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -8,6 +8,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css"/>
+  <script>
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing alias debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  </script>
+  <script src="https://browser.sentry-cdn.com/7.119.0/bundle.min.js" crossorigin="anonymous"></script>
   <style>
     .privacy-wrap {
       max-width: 680px;
@@ -45,8 +49,10 @@
   <p class="updated">Last updated: March 2026</p>
 
   <div class="highlight-box">
-    <strong>Short version:</strong> Pluks collects nothing. All data stays on your device.
-    No servers. No accounts. No telemetry. Nothing leaves your machine.
+    <strong>Short version:</strong> The text you copy never leaves your device. We do
+    collect anonymous usage stats and crash reports to help us improve Pluks — you
+    can opt out in the desktop app's Preferences, in the browser-extension popup, or
+    by enabling "Do Not Track" on this website.
   </div>
 
   <h2>What Pluks collects</h2>
@@ -75,9 +81,35 @@
     it never reads page content, passwords, form data, or any other information.</li>
   </ul>
 
-  <h2>Third-party services</h2>
-  <p>Pluks uses no third-party analytics, crash reporting, advertising, or tracking services
-  of any kind, in either the desktop app or the browser extension.</p>
+  <h2>Analytics &amp; error reporting</h2>
+  <p>Pluks uses two services to collect <strong>anonymous</strong>, opt-out telemetry:
+  <a href="https://posthog.com" target="_blank" rel="noopener">PostHog</a> for usage
+  analytics and <a href="https://sentry.io" target="_blank" rel="noopener">Sentry</a>
+  for error and crash reports. Both are sent against an anonymous UUID generated
+  locally on first run — there is no account, no email, no device fingerprint.</p>
+
+  <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">What we send</h3>
+  <ul>
+    <li>Event counts: panel opens, history clicks, smart-paste use, search use, downloads.</li>
+    <li>Coarse properties: app/extension version, OS or browser family, locale, screen size.</li>
+    <li>Bucketed selection length (e.g. <code>11-100</code>, <code>101-1000</code>) — never the value.</li>
+    <li>Error type, stack trace, and a hash of the error message.</li>
+  </ul>
+
+  <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">What we never send</h3>
+  <ul>
+    <li>The text you copy or select — ever, anywhere.</li>
+    <li>The websites you visit, page titles, page content, or hostnames.</li>
+    <li>Your name, email, IP-derived location finer than country, or any device identifier.</li>
+    <li>Tokens, passwords, file paths, or anything that pattern-matches a secret.</li>
+  </ul>
+
+  <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">How to opt out</h3>
+  <ul>
+    <li><strong>Desktop app:</strong> click the ⚙ in the panel titlebar → toggle "Send anonymous usage stats" and "Send crash reports".</li>
+    <li><strong>Browser extension:</strong> open the popup → uncheck "Send anonymous stats" in the footer.</li>
+    <li><strong>Website:</strong> enable "Do Not Track" in your browser, or append <code>?opt_out=1</code> to any pluks.app URL once.</li>
+  </ul>
 
   <h2>Data storage</h2>
   <p>All data is stored exclusively on your device:</p>
@@ -105,5 +137,6 @@
   <span class="footer-copy">MIT License · Made with ✦ and Rust</span>
   <a href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener" class="footer-link">GitHub</a>
 </footer>
+<script src="analytics.js"></script>
 </body>
 </html>

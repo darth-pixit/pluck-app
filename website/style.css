@@ -773,3 +773,17 @@ kbd {
   .footer { padding: 24px 20px; }
   .footer-link { margin-left: 0; width: 100%; }
 }
+
+/* ── Privacy & telemetry section ─────────────────────────────────────── */
+.privacy-blurb { padding: 80px 24px; max-width: 760px; margin: 0 auto; text-align: left; }
+.privacy-blurb .section-title { text-align: center; }
+.privacy-bullets { list-style: none; padding: 0; margin: 24px 0; }
+.privacy-bullets li {
+  color: rgba(255,255,255,0.7);
+  font-size: 15px;
+  line-height: 1.7;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.privacy-bullets li:last-child { border-bottom: none; }
+.privacy-bullets strong { color: #fff; font-weight: 600; }
