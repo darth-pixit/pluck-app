@@ -16,6 +16,8 @@
   var SENTRY_DSN   = "https://PLACEHOLDER_REPLACE_AT_DEPLOY@o0.ingest.sentry.io/0";
   var RELEASE      = "pluks-web@2026.04";
 
+  function isRealKey(s) { return !!s && s.indexOf("PLACEHOLDER") === -1; }
+
   var KEY_OPT_OUT = "pluks_opt_out";
   var KEY_ANON    = "pluks_anon_id";
 
@@ -64,7 +66,9 @@
     error_uncaught_js:       ["error_type", "error_message_hash"]
   };
 
-  var DENY_RX = /\b(text|content|selection|email|path|token|secret|password)\b/i;
+  // Aligned with app/src/analytics.ts and extension/analytics.js — exact-match
+  // anchors so a key like `email_hash` isn't accidentally flagged.
+  var DENY_RX = /^(text|content|url|selection|email|path|host|hostname|page_title|tab_url|secret|token|password)$/i;
 
   function bucket(n) {
     if (n <= 10) return "1-10";
@@ -119,7 +123,7 @@
   }
 
   // ── Init PostHog ────────────────────────────────────────────────────────
-  if (window.posthog && typeof window.posthog.init === "function") {
+  if (window.posthog && typeof window.posthog.init === "function" && isRealKey(POSTHOG_KEY)) {
     try {
       window.posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
@@ -139,7 +143,7 @@
   }
 
   // ── Init Sentry ─────────────────────────────────────────────────────────
-  if (window.Sentry && typeof window.Sentry.init === "function" && !optedOut) {
+  if (window.Sentry && typeof window.Sentry.init === "function" && !optedOut && isRealKey(SENTRY_DSN)) {
     try {
       window.Sentry.init({
         dsn: SENTRY_DSN,

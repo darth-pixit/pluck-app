@@ -157,7 +157,6 @@ export default function App() {
     win.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         lastShownAt.current = Date.now();
-        track("panel_opened", { trigger: "focus_change", had_focus_target: true });
         checkPermissions();
         searchRef.current?.focus();
       } else if (!needsSetup) {

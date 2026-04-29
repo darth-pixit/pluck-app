@@ -19,6 +19,8 @@
   var POSTHOG_HOST = CFG.POSTHOG_HOST || "https://us.i.posthog.com";
   var SENTRY_DSN   = CFG.SENTRY_DSN   || "";
 
+  function isRealKey(s) { return !!s && s.indexOf("PLACEHOLDER") === -1; }
+
   var KEY_ANON    = "pluks_anon_id";
   var KEY_OPT_OUT = "pluks_opt_out";
   var KEY_LAST_VER = "pluks_last_seen_version";
@@ -129,7 +131,7 @@
   async function track(event, props) {
     try {
       if (!_anonId) await ensureIdentity();
-      if (_optOut || !POSTHOG_KEY) return;
+      if (_optOut || !isRealKey(POSTHOG_KEY)) return;
       var clean = whitelist(event, props || {});
       if (!clean) return;
       var body = {
@@ -163,7 +165,7 @@
       };
     } catch (_) { return null; }
   }
-  var _dsn = SENTRY_DSN ? parseDsn(SENTRY_DSN) : null;
+  var _dsn = isRealKey(SENTRY_DSN) ? parseDsn(SENTRY_DSN) : null;
 
   function scrubPaths(s) {
     if (typeof s !== "string") return s;

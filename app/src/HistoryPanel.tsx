@@ -48,21 +48,24 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
   // Keyboard navigation. Functional setters keep `active` out of the dep array,
   // so this listener doesn't churn on every arrow keypress.
   useEffect(() => {
-    // Sample 1-in-10 navigation events; otherwise this can drown out other signals.
-    const sampleNav = () => Math.random() < 0.1;
+    // Sample 1-in-10 nav events to keep volume sane. Sampling happens outside
+    // the setState updater so React strict-mode double-invocation in dev
+    // doesn't double the effective sample rate.
     const handler = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
+        const sampled = Math.random() < 0.1;
         setActive(a => {
           const next = Math.min(a + 1, items.length - 1);
-          if (next !== a && sampleNav()) onNavigate?.("down", a, next);
+          if (next !== a && sampled) onNavigate?.("down", a, next);
           return next;
         });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        const sampled = Math.random() < 0.1;
         setActive(a => {
           const next = Math.max(a - 1, 0);
-          if (next !== a && sampleNav()) onNavigate?.("up", a, next);
+          if (next !== a && sampled) onNavigate?.("up", a, next);
           return next;
         });
       } else if (e.key === "Enter") {

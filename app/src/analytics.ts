@@ -14,6 +14,8 @@ const POSTHOG_HOST = (import.meta.env.VITE_POSTHOG_HOST as string) || "https://u
 const SENTRY_DSN   = (import.meta.env.VITE_SENTRY_DSN   as string) || "";
 const APP_VERSION  = (import.meta.env.VITE_APP_VERSION  as string) || "0.0.0";
 
+const isRealKey = (s: string) => !!s && !s.includes("PLACEHOLDER");
+
 // Allowed property keys per event. `track()` drops anything not on the list.
 const SCHEMA: Record<string, readonly string[]> = {
   app_installed:                 [],
@@ -132,7 +134,7 @@ export async function initAnalytics(): Promise<void> {
   }
 
   // PostHog
-  if (POSTHOG_KEY) {
+  if (isRealKey(POSTHOG_KEY)) {
     try {
       posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
@@ -153,7 +155,7 @@ export async function initAnalytics(): Promise<void> {
   }
 
   // Sentry
-  if (SENTRY_DSN && !_settings.crash_opt_out) {
+  if (isRealKey(SENTRY_DSN) && !_settings.crash_opt_out) {
     try {
       Sentry.init({
         dsn: SENTRY_DSN,
@@ -196,9 +198,11 @@ export async function initAnalytics(): Promise<void> {
   }
 }
 
-export function track(event: string, props: Record<string, unknown> = {}): void {
+export type EventName = keyof typeof SCHEMA;
+
+export function track(event: EventName, props: Record<string, unknown> = {}): void {
   if (!_settings || _settings.opt_out) return;
-  if (!POSTHOG_KEY) return;
+  if (!isRealKey(POSTHOG_KEY)) return;
   const clean = whitelist(event, props);
   if (!clean) return;
   try {
@@ -261,7 +265,9 @@ export async function setCrashOptOut(optOut: boolean): Promise<void> {
   try { await invoke("set_settings", { settings: _settings }); } catch {}
 }
 
-export function getSettings(): Settings | null { return _settings; }
+export function getSettings(): Settings | null {
+  return _settings ? { ..._settings } : null;
+}
 
 export async function resetAnonymousId(): Promise<void> {
   if (!_settings) return;
