@@ -20,6 +20,8 @@
   var SENTRY_DSN   = CFG.SENTRY_DSN   || "";
 
   function isRealKey(s) { return !!s && s.indexOf("PLACEHOLDER") === -1; }
+  if (!isRealKey(POSTHOG_KEY)) console.warn("[pluks-ext] PostHog disabled — placeholder key in use");
+  if (!isRealKey(SENTRY_DSN))  console.warn("[pluks-ext] Sentry disabled — placeholder DSN in use");
 
   var KEY_ANON    = "pluks_anon_id";
   var KEY_OPT_OUT = "pluks_opt_out";
