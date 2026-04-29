@@ -32,7 +32,7 @@
     app_launched:            ["cold_start", "since_last_launch_ms"],
     analytics_opted_out:     [],
     analytics_opted_in:      [],
-    selection_captured:      ["char_count_bucket", "was_drag", "was_multi_click", "scheme"],
+    selection_captured:      ["char_count_bucket", "was_drag", "was_multi_click", "scheme", "content_kind"],
     selection_capture_failed:["reason"],
     toast_shown:             ["char_count_bucket"],
     popup_opened:            ["item_count"],
@@ -43,6 +43,13 @@
   };
 
   var DENY_RX = /^(text|content|url|selection|email|path|host|hostname|page_title|tab_url|secret|token|password)$/i;
+
+  // Strict enums for properties whose values are derived from page content.
+  // Defense-in-depth: if a future caller passes an attacker-influenced string,
+  // anything outside the enum is dropped before leaving the device.
+  var ENUMS = {
+    content_kind: ["url", "json", "email", "color", "code", "text"]
+  };
 
   // ── Storage helpers (chrome.storage.local) ──────────────────────────────
   function storageGet(keys) {
@@ -122,7 +129,10 @@
     var out = {};
     for (var i = 0; i < allowed.length; i++) {
       var k = allowed[i];
-      if (props && k in props && !DENY_RX.test(k)) out[k] = props[k];
+      if (!props || !(k in props) || DENY_RX.test(k)) continue;
+      var v = props[k];
+      if (ENUMS[k] && ENUMS[k].indexOf(v) === -1) continue;
+      out[k] = v;
     }
     return out;
   }
