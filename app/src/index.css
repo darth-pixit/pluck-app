@@ -48,7 +48,8 @@ html, body, #root {
   cursor: default;
 }
 
-/* macOS traffic lights */
+/* macOS traffic lights — hidden on non-mac platforms where they look out of
+   place. On Win/Linux the user closes via Esc, the tray, or alt+F4. */
 .traffic-lights {
   display: flex;
   align-items: center;
@@ -56,6 +57,7 @@ html, body, #root {
   margin-right: 10px;
   -webkit-app-region: no-drag;
 }
+body:not(.platform-mac) .traffic-lights { display: none; }
 
 .tl {
   width: 12px;
