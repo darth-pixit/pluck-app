@@ -721,7 +721,17 @@ kbd {
   transform: translateY(-3px);
 }
 
-.platform-icon { font-size: 36px; }
+.platform-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  opacity: .92;
+}
+.platform-icon svg { width: 100%; height: 100%; display: block; }
+.platform-card:hover .platform-icon { color: var(--accent-2); opacity: 1; }
 .platform-card h3 { font-size: 17px; font-weight: 700; }
 .platform-card p { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
 
