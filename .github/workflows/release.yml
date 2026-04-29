@@ -151,10 +151,20 @@ jobs:
           APPLE_ID:                   ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD:             ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID:              ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri updater archive signing keys. Generate once with
+          #   npx @tauri-apps/cli signer generate -w ~/.tauri/pluks.key
+          # and store the resulting .key contents as TAURI_SIGNING_PRIVATE_KEY
+          # (with its password as TAURI_SIGNING_PRIVATE_KEY_PASSWORD). The
+          # matching public key goes into tauri.conf.json -> plugins.updater.pubkey.
+          TAURI_SIGNING_PRIVATE_KEY:          ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
+          # Emits per-platform signature entries; the publish step below
+          # merges them into a single latest.json for the updater endpoint.
+          includeUpdaterJson: true
 
       # ── macOS: notarize + staple the DMG, then replace the release asset ─────
       - name: Notarize and staple DMG

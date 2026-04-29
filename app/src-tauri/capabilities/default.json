@@ -11,6 +11,9 @@
     "core:window:allow-center",
     "core:window:allow-is-visible",
     "core:window:allow-set-always-on-top",
-    "core:webview:allow-internal-toggle-devtools"
+    "core:webview:allow-internal-toggle-devtools",
+    "updater:default",
+    "process:default",
+    "process:allow-restart"
   ]
 }
