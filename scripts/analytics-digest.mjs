@@ -134,14 +134,11 @@ async function fetchMetrics() {
 
     hogql(`
       SELECT
-        countIf(toDate(timestamp) = today())     AS dau_today,
-        countIf(toDate(timestamp) = yesterday())  AS dau_yesterday
-      FROM (
-        SELECT DISTINCT distinct_id, toDate(timestamp) AS day
-        FROM events
-        WHERE event = 'app_launched'
-          AND timestamp >= now() - INTERVAL 2 DAY
-      )
+        uniqIf(distinct_id, toDate(timestamp) = today())     AS dau_today,
+        uniqIf(distinct_id, toDate(timestamp) = yesterday())  AS dau_yesterday
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 2 DAY
     `),
 
   ]);
