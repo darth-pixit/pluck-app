@@ -85,44 +85,52 @@
   }
 
   // ── Content-kind classifier ───────────────────────────────────────────────
-  // Returns a coarse label only ("url" | "json" | "email" | "color" | "code"
-  // | "text"). The label is the ONLY thing derived from the selection that
-  // ever leaves the device; the original text is never sent.
+  // Returns a coarse label. The label is the ONLY thing derived from the
+  // selection that ever leaves the device; the original text is never sent.
+  // Mirror of app/src/detectors.ts — keep regexes in sync.
 
   var URL_RE   = /^(https?:\/\/|ftp:\/\/)\S+$/i;
   var WWW_RE   = /^www\.[^\s.]+\.\S+$/i;
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   var HEX_RE   = /^#?([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-  // Cap JSON.parse — selections can be megabytes of log output.
-  var JSON_PARSE_MAX = 500000;
+  var CODE_INDENT_RE  = /^(\s{2,}|\t)/;
+  var CODE_BRACE_RE   = /[;{}]\s*$/;
+  var CODE_KEYWORD_RE = /^\s*(import|from|function|const|let|var|class|def|return|if|for|while|public|private)\b/;
+
+  // Synchronous bounds — classify runs on the page's main thread inside the
+  // mouseup handler. Keep work small even on adversarial multi-MB selections.
+  var CLASSIFY_MAX = 100000;
+  var JSON_PARSE_MAX = 65536;
+  var CODE_LINE_MAX  = 2000;
 
   function looksLikeCode(s) {
-    var lines = s.split("\n");
+    var lines = s.split("\n", CODE_LINE_MAX + 1);
     if (lines.length < 2) return false;
+    var sample = Math.min(lines.length, CODE_LINE_MAX);
     var codey = 0;
-    for (var i = 0; i < lines.length; i++) {
+    for (var i = 0; i < sample; i++) {
       var l = lines[i];
-      if (/^(\s{2,}|\t)/.test(l) ||
-          /[;{}]\s*$/.test(l) ||
-          /^\s*(import|from|function|const|let|var|class|def|return|if|for|while|public|private)\b/.test(l)) {
+      if (CODE_INDENT_RE.test(l) || CODE_BRACE_RE.test(l) || CODE_KEYWORD_RE.test(l)) {
         codey++;
       }
     }
-    return codey / lines.length >= 0.4;
+    return codey / sample >= 0.4;
   }
 
-  function classify(text) {
-    var trimmed = text.trim();
+  function classify(trimmed) {
     if (!trimmed) return "text";
+    if (trimmed.length > CLASSIFY_MAX) return "text";
     if (HEX_RE.test(trimmed)) return "color";
     if (URL_RE.test(trimmed) || WWW_RE.test(trimmed)) return "url";
     if (EMAIL_RE.test(trimmed)) return "email";
     var first = trimmed[0], last = trimmed[trimmed.length - 1];
     if (trimmed.length <= JSON_PARSE_MAX &&
         ((first === "{" && last === "}") || (first === "[" && last === "]"))) {
+      // Swallow silently — V8's parse-error message embeds input bytes; never
+      // forward this exception (e.g. captureException) or the selection leaks.
       try { JSON.parse(trimmed); return "json"; } catch (_) {}
     }
-    if (looksLikeCode(text)) return "code";
+    if (looksLikeCode(trimmed)) return "code";
     return "text";
   }
 
