@@ -430,6 +430,129 @@ body:not(.platform-mac) .traffic-lights { display: none; }
 .gear-btn:hover { color: var(--accent-2); background: rgba(255,255,255,0.04); }
 .gear-btn.active { color: var(--accent); }
 
+/* ── Setup-mode dismiss button (visible on all platforms during setup) ── */
+.setup-dismiss {
+  -webkit-app-region: no-drag;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.setup-dismiss:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(252,76,2,0.10);
+}
+
+/* When in setup mode, the panel is freely movable and feels less like an
+   intrusive overlay — soften the always-on-top vibe with a subtle outline. */
+.panel-setup {
+  box-shadow:
+    0 0 0 1px rgba(252,76,2,.12),
+    0 12px 40px rgba(0,0,0,.55);
+}
+
+/* ── Post-permission onboarding tour ───────────────────────────────── */
+.tour-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 5, 4, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 100;
+  border-radius: var(--radius);
+  animation: tour-fade .18s ease-out;
+}
+
+@keyframes tour-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.tour-card {
+  width: 100%;
+  background: rgba(20, 14, 10, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.6);
+}
+
+.tour-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tour-dot {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.12);
+  transition: background .2s;
+}
+.tour-dot.active { background: var(--accent); }
+.tour-dot.done   { background: rgba(252,76,2,0.45); }
+
+.tour-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.tour-body {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+  gap: 8px;
+}
+
+.tour-skip {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 6px;
+  transition: color .12s, background .12s;
+}
+.tour-skip:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+
+.tour-next {
+  margin-left: auto;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.tour-next:hover { background: var(--accent-2); border-color: var(--accent-2); }
+
 /* ── Setup screen privacy note ─────────────────────────────────────── */
 .setup-privacy-note {
   font-size: 11px;

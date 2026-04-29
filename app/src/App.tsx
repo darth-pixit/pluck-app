@@ -56,7 +56,10 @@ function SetupScreen({
   return (
     <div className="setup-screen">
       <div className="setup-logo">pluks</div>
-      <p className="setup-intro">Two quick permissions to get you set up — these only need to be done once.</p>
+      <p className="setup-intro">
+        Two quick permissions to get you set up — these only need to be done once.
+        You can drag this window by its title bar, or hide it and re-open from the menu-bar icon.
+      </p>
       <div className="setup-steps">
         <div className={`setup-step ${hasAccessibility ? "done" : "pending"}`}>
           <div className="step-icon">{hasAccessibility ? "✓" : "1"}</div>
@@ -96,6 +99,63 @@ function SetupScreen({
   );
 }
 
+// ── Post-permission onboarding tour ────────────────────────────────────────────
+
+const ONBOARDING_KEY = "pluks.onboarding.v1.seen";
+
+interface TourStep {
+  title: string;
+  body: string;
+}
+
+const TOUR_STEPS: TourStep[] = [
+  {
+    title: "Select any text",
+    body: "Pluks watches your selections in the background and auto-copies them. No keyboard shortcut needed — just highlight.",
+  },
+  {
+    title: `Open Pluks anywhere with ${SHORTCUT_HINT}`,
+    body: "Hit the shortcut from any app to bring up your last 100 clips. Hold the modifier and release to instantly paste the highlighted item.",
+  },
+  {
+    title: "Smart paste",
+    body: "JSON gets prettified, URLs become Markdown links, hex turns into rgb(). Look for the action row under recognized items.",
+  },
+];
+
+function OnboardingTour({ onDone }: { onDone: (reason: "skipped" | "completed") => void }) {
+  const [step, setStep] = useState(0);
+  const last = step === TOUR_STEPS.length - 1;
+  const current = TOUR_STEPS[step];
+  return (
+    <div className="tour-overlay" role="dialog" aria-modal="true" aria-label="Pluks onboarding">
+      <div className="tour-card">
+        <div className="tour-progress">
+          {TOUR_STEPS.map((_, i) => {
+            const cls = i === step ? "active" : i < step ? "done" : "";
+            return <span key={i} className={`tour-dot ${cls}`} />;
+          })}
+        </div>
+        <h2 className="tour-title">{current.title}</h2>
+        <p className="tour-body">{current.body}</p>
+        <div className="tour-actions">
+          <button className="tour-skip" onClick={() => onDone("skipped")}>Skip</button>
+          <button
+            className="tour-next"
+            onClick={() => {
+              track("onboarding_step_advanced", { step });
+              if (last) onDone("completed");
+              else setStep(s => s + 1);
+            }}
+          >
+            {last ? "Get started" : "Next →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -109,6 +169,9 @@ export default function App() {
   const [prefsOpen, setPrefsOpen]                   = useState(false);
   // When true: opened via CMD+Shift+V; releasing CMD auto-pastes the active item.
   const [keyboardMode, setKeyboardMode]             = useState(false);
+  const [showTour, setShowTour]                     = useState(false);
+  // null = before-first-run sentinel; flips to a boolean after the initial pass.
+  const wasInSetupRef                               = useRef<boolean | null>(null);
   const keyboardModeTime                            = useRef(0);
   const lastShownAt                                 = useRef(0);
   const activeItemIdRef                             = useRef<number | null>(null);
@@ -164,6 +227,30 @@ export default function App() {
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [needsSetup, checkPermissions]);
+
+  // Drop always-on-top while setup is showing so the panel doesn't float over
+  // System Settings during permission grants; restore once setup is done.
+  // Skip the very first run — at mount we haven't verified perms yet, and
+  // pre-empting the Rust-side configure_overlay_window default would briefly
+  // demote the panel for already-permissioned users.
+  useEffect(() => {
+    if (wasInSetupRef.current === null) {
+      wasInSetupRef.current = needsSetup;
+      return;
+    }
+    getCurrentWindow().setAlwaysOnTop(!needsSetup).catch(console.warn);
+    if (wasInSetupRef.current && !needsSetup && !localStorage.getItem(ONBOARDING_KEY)) {
+      setShowTour(true);
+      track("onboarding_started", {});
+    }
+    wasInSetupRef.current = needsSetup;
+  }, [needsSetup]);
+
+  const dismissTour = useCallback((reason: "skipped" | "completed") => {
+    try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* private mode / quota */ }
+    track("onboarding_completed", { dismiss_reason: reason });
+    setShowTour(false);
+  }, []);
 
   // On focus: re-check permissions + refocus the search field, and stamp
   // the open time so the immediately-following blur (from focus flicker
@@ -335,12 +422,20 @@ export default function App() {
 
   if (needsSetup) {
     return (
-      <div className="panel">
+      <div className="panel panel-setup">
         <div className="titlebar" data-tauri-drag-region>
           <div className="traffic-lights">
             <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
           </div>
           <span className="brand">pluks</span>
+          {!IS_MAC && (
+            <button
+              className="setup-dismiss"
+              title="Hide window — re-open from the menu-bar icon"
+              onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={hideWindow}
+            >Hide ✕</button>
+          )}
         </div>
         <SetupScreen hasAccessibility={hasAccessibility} hasInputMonitoring={hasInputMonitoring} onCheck={checkPermissions} />
       </div>
@@ -407,6 +502,8 @@ export default function App() {
         <button className="btn-clear" onClick={handleClear}>Clear all</button>
         <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close · {SHORTCUT_HINT} toggle</span>
       </div>
+
+      {showTour && <OnboardingTour onDone={dismissTour} />}
     </div>
   );
 }
