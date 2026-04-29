@@ -194,15 +194,18 @@ export default function App() {
     if (!needsSetup) searchRef.current?.focus();
   }, [needsSetup]);
 
-  const handleCopy = useCallback(async (id: number) => {
+  // Push something onto the clipboard, hide the panel, wait for macOS to
+  // restore focus to the previously-foreground app, then synthesize Cmd+V.
+  const pasteVia = useCallback(async (cmd: string, args: Record<string, unknown>) => {
     setKeyboardMode(false);
-    await invoke("copy_item", { id });
+    await invoke(cmd, args);
     await hideWindow();
-    // Wait for macOS to restore focus to whatever app was foreground before
-    // the panel opened, then send Cmd+V there.
     await new Promise(r => setTimeout(r, PASTE_FOCUS_RESTORE_MS));
     await invoke("invoke_paste");
   }, []);
+
+  const handleCopy            = useCallback((id: number)    => pasteVia("copy_item", { id }),     [pasteVia]);
+  const handleCopyTransformed = useCallback((text: string)  => pasteVia("copy_text", { text }),   [pasteVia]);
 
   const handleDelete = useCallback(async (id: number) => {
     const ok = await invoke<boolean>("delete_item", { id });
@@ -262,6 +265,7 @@ export default function App() {
           onCopy={handleCopy}
           onDelete={handleDelete}
           onActiveChange={id => { activeItemIdRef.current = id; }}
+          onCopyTransformed={handleCopyTransformed}
         />
       )}
 
