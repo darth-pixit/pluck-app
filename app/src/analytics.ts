@@ -55,6 +55,7 @@ const SCHEMA: Record<string, readonly string[]> = {
   history_searched:              ["query_length_bucket", "result_count"],
   history_navigated_keyboard:    ["direction", "from_index", "to_index"],
   smart_paste_used:              ["kind", "action_label"],
+  feedback_clicked:              ["source"],
 
   error_uncaught_js:             ["error_type", "error_message_hash", "where"],
   error_tauri_invoke_failed:     ["command", "error_type"],

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { getSettings, resetAnonymousId, setCrashOptOut, setOptOut, type Settings } from "./analytics";
+import { getSettings, resetAnonymousId, setCrashOptOut, setOptOut, track, type Settings } from "./analytics";
+
+const FEEDBACK_EMAIL = "parthdixit.iitd@gmail.com";
+const FEEDBACK_SUBJECT = "Pluks feedback";
 
 interface Props {
   onClose: () => void;
@@ -84,6 +87,20 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
         <button className="prefs-btn" onClick={onResetId} disabled={resetting}>
           {resetting ? "Resetting…" : "Reset anonymous ID"}
         </button>
+      </section>
+
+      <section className="prefs-section">
+        <h3 className="prefs-section-title">Feedback</h3>
+        <p className="prefs-meta">
+          Found a bug, have a feature request, or just want to say hi? Email the creator directly.
+        </p>
+        <a
+          className="prefs-btn"
+          href={`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(FEEDBACK_SUBJECT)}`}
+          onClick={() => track("feedback_clicked", { source: "preferences" })}
+        >
+          Send feedback →
+        </a>
       </section>
 
       <section className="prefs-section">
