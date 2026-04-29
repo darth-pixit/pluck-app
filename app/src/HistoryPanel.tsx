@@ -31,14 +31,8 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
   const listRef = useRef<HTMLUListElement>(null);
 
   const activeItem = items[active];
-  const activeDetection = useMemo(
-    () => (activeItem ? detect(activeItem.content) : null),
-    [activeItem],
-  );
-  const itemKinds = useMemo(
-    () => items.map(i => detect(i.content)?.badge ?? null),
-    [items],
-  );
+  const detections = useMemo(() => items.map(i => detect(i.content)), [items]);
+  const activeDetection = detections[active] ?? null;
 
   useEffect(() => {
     if (items[active]) onActiveChange?.(items[active].id);
@@ -97,9 +91,9 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
             onClick={() => onCopy(item.id)}
           >
             <span className="item-preview">
-              {itemKinds[idx] && (
-                <span className={`kind-badge kind-${itemKinds[idx]!.toLowerCase()}`}>
-                  {itemKinds[idx]}
+              {detections[idx] && (
+                <span className={`kind-badge kind-${detections[idx]!.kind}`}>
+                  {detections[idx]!.badge}
                 </span>
               )}
               {item.content.length > 120
