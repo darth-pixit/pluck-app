@@ -23,39 +23,31 @@
     }, 2400);
   }
 
-  document.addEventListener("mouseup", function (e) {
-    // Only react to selections inside the demo card
-    const card = document.getElementById("demo-card");
-    if (!card) return;
+  function handleSelection() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
 
-    // Small delay to let the browser register the selection
-    setTimeout(function () {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
+    const selectedText = sel.toString().trim();
+    if (!selectedText) return;
 
-      const selectedText = sel.toString().trim();
-      if (!selectedText) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(selectedText).catch(function () {
+        try { document.execCommand("copy"); } catch (_) {}
+      });
+    } else {
+      try { document.execCommand("copy"); } catch (_) {}
+    }
 
-      // Is the selection inside our demo card?
-      const anchor = sel.anchorNode;
-      if (!card.contains(anchor)) return;
+    showToast(selectedText);
+  }
 
-      // Copy to clipboard
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(selectedText).catch(function () {
-          // Fallback: execCommand
-          try {
-            document.execCommand("copy");
-          } catch (_) {}
-        });
-      } else {
-        try {
-          document.execCommand("copy");
-        } catch (_) {}
-      }
-
-      showToast(selectedText);
-    }, 10);
+  document.addEventListener("mouseup", function () {
+    setTimeout(handleSelection, 10);
+  });
+  document.addEventListener("keyup", function (e) {
+    if (e.shiftKey || e.key === "Shift" || (e.key && e.key.startsWith("Arrow"))) {
+      setTimeout(handleSelection, 10);
+    }
   });
 
   // Highlight OS-specific download CTA
