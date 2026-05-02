@@ -373,6 +373,12 @@ pub fn run() {
             Some(vec![]),
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Background auto-updater. Downloads + signature verification happen in
+        // Rust; the JS side decides when to apply the update so we never yank
+        // the app out from under the user mid-session.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Needed so the JS side can relaunch after a deferred install.
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -442,7 +448,18 @@ pub fn run() {
                             });
                         }
                         TRAY_HISTORY => toggle_history_window(&app_handle, false),
-                        TRAY_QUIT => app_handle.exit(0),
+                        TRAY_QUIT => {
+                            // Give the frontend a chance to install a staged
+                            // update before we tear down. The listener has up
+                            // to 800ms to call install_update + relaunch; if
+                            // none is staged, it no-ops and we exit normally.
+                            let _ = app_handle.emit("app-quit-requested", ());
+                            let h = app_handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_millis(800));
+                                h.exit(0);
+                            });
+                        }
                         _ => {}
                     }
                 })

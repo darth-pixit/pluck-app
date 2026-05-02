@@ -656,3 +656,88 @@ body:not(.platform-mac) .traffic-lights { display: none; }
 .prefs-meta { font-size: 11px; color: var(--muted); margin: 0; }
 .prefs-meta a { color: var(--accent-2); text-decoration: none; }
 .prefs-meta a:hover { text-decoration: underline; }
+
+/* ── Auto-update banner ───────────────────────────────────────────────── */
+.update-banner {
+  margin: 8px 10px 0;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(252,76,2,0.12), rgba(252,76,2,0.06));
+  border: 1px solid rgba(252,76,2,0.35);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+  animation: update-banner-in .22s ease-out;
+}
+@keyframes update-banner-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.update-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.update-banner-title {
+  font-weight: 600;
+  color: var(--accent-2);
+}
+.update-banner-dismiss {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.update-banner-dismiss:hover { color: var(--text); }
+.update-banner-notes {
+  margin: 6px 0 8px;
+  padding-left: 16px;
+  color: rgba(255,255,255,0.78);
+}
+.update-banner-notes li { margin: 2px 0; line-height: 1.35; }
+.update-banner-actions {
+  display: flex;
+  gap: 6px;
+}
+.update-banner-primary,
+.update-banner-secondary {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.update-banner-primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+.update-banner-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.update-banner-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.update-banner-secondary:hover { border-color: var(--accent); color: var(--accent-2); }
+.update-banner-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 10px;
+}
+.update-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: update-spin .8s linear infinite;
+}
+@keyframes update-spin { to { transform: rotate(360deg); } }
+

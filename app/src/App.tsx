@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import HistoryPanel from "./HistoryPanel";
 import PreferencesScreen from "./PreferencesScreen";
+import UpdateBanner from "./UpdateBanner";
+import { startUpdater } from "./updater";
 import { bucket, safeInvoke, track } from "./analytics";
 import { detect } from "./detectors";
 import "./index.css";
@@ -216,6 +218,9 @@ export default function App() {
       });
     }).catch(console.error);
     checkPermissions();
+    // Start the background updater. Internal startup delay + idempotent so
+    // it's safe under StrictMode and doesn't compete with permission prompts.
+    startUpdater();
   }, [checkPermissions]);
 
   useEffect(() => {
@@ -497,6 +502,8 @@ export default function App() {
           onNavigate={(direction, from, to) => track("history_navigated_keyboard", { direction, from_index: from, to_index: to })}
         />
       )}
+
+      <UpdateBanner />
 
       <div className="panel-footer">
         <button className="btn-clear" onClick={handleClear}>Clear all</button>
