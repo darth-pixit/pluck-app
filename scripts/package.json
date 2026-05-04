@@ -1,1 +1,12 @@
-{}
+{
+  "name": "pluks-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "digest": "node analytics-digest.mjs"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.16"
+  }
+}

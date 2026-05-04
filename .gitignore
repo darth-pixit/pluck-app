@@ -5,6 +5,7 @@ app/src-tauri/gen/
 # Node
 app/node_modules/
 app/dist/
+scripts/node_modules/
 
 # OS
 .DS_Store
