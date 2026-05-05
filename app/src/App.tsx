@@ -1,4 +1,4 @@
-import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,7 +12,10 @@ import "./index.css";
 
 // Direct Tauri window API — never goes through Rust invoke, always reliable.
 const hideWindow = () => getCurrentWindow().hide();
-const minimizeWindow = () => getCurrentWindow().hide();
+// macOS NSPanel may ignore minimize without the miniaturizable style bit;
+// fall back to hide so the yellow button always does *something* useful.
+const minimizeWindow = () =>
+  getCurrentWindow().minimize().catch(() => getCurrentWindow().hide());
 
 // Programmatic drag — more reliable than data-tauri-drag-region on NSPanel,
 // especially when another app (e.g. System Settings during permission grants)
@@ -22,6 +25,37 @@ const startDrag = (e: ReactMouseEvent) => {
   if (e.button !== 0) return;
   getCurrentWindow().startDragging().catch(() => { /* dragging unsupported — fine */ });
 };
+
+// Standard macOS traffic-light cluster — close + minimize, per HIG.
+// Zoom is omitted because the panel is fixed-size by design.
+function TrafficLights() {
+  return (
+    <div className="traffic-lights">
+      <button
+        className="tl tl-close"
+        title="Close"
+        aria-label="Close"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }}
+      />
+      <button
+        className="tl tl-min"
+        title="Minimize"
+        aria-label="Minimize"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); minimizeWindow(); }}
+      />
+    </div>
+  );
+}
+
+function Titlebar({ children }: { children?: ReactNode }) {
+  return (
+    <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
+      <TrafficLights />
+      <span className="brand" data-tauri-drag-region>pluks</span>
+      {children}
+    </div>
+  );
+}
 
 // Platform detection (synchronous, fine for static UI/keybinding choices).
 // userAgentData.platform is the modern source; navigator.platform is the
@@ -186,7 +220,10 @@ export default function App() {
   // permissions for before being prompted. Initialised lazily from
   // localStorage so first-run users land on the tour, not the perms screen.
   const [showTour, setShowTour]                     = useState(() => {
-    try { return !localStorage.getItem(ONBOARDING_KEY); } catch { return false; }
+    let seen = true;
+    try { seen = !!localStorage.getItem(ONBOARDING_KEY); } catch { /* private mode */ }
+    if (!seen) track("onboarding_started", {});
+    return !seen;
   });
   const keyboardModeTime                            = useRef(0);
   const lastShownAt                                 = useRef(0);
@@ -250,17 +287,16 @@ export default function App() {
   // Drop always-on-top while the permission setup screen is showing so the
   // panel doesn't float over System Settings during grants; restore once
   // setup is done. Tour-in-progress doesn't open System Settings, so it
-  // can stay always-on-top.
+  // stays always-on-top. The ref guards against redundant IPC calls — Rust
+  // already configures alwaysOnTop=true at startup, so a no-op transition
+  // would otherwise round-trip on every mount and on every needsSetup flip.
+  const lastAlwaysOnTopRef = useRef<boolean | null>(null);
   useEffect(() => {
-    const showingPerms = needsSetup && !showTour;
-    getCurrentWindow().setAlwaysOnTop(!showingPerms).catch(console.warn);
+    const wantOnTop = !(needsSetup && !showTour);
+    if (lastAlwaysOnTopRef.current === wantOnTop) return;
+    lastAlwaysOnTopRef.current = wantOnTop;
+    getCurrentWindow().setAlwaysOnTop(wantOnTop).catch(console.warn);
   }, [needsSetup, showTour]);
-
-  // Fire onboarding_started once per fresh install when the tour first appears.
-  useEffect(() => {
-    if (showTour) track("onboarding_started", {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const dismissTour = useCallback((reason: "skipped" | "completed") => {
     try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* private mode / quota */ }
@@ -436,32 +472,10 @@ export default function App() {
     ? items.filter(i => i.content.toLowerCase().includes(query.toLowerCase()))
     : items;
 
-  // Standard macOS traffic-light cluster — close + minimize, per HIG.
-  // We omit zoom/maximize because the panel is fixed-size by design.
-  const TrafficLights = () => (
-    <div className="traffic-lights">
-      <button
-        className="tl tl-close"
-        title="Close"
-        aria-label="Close"
-        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }}
-      />
-      <button
-        className="tl tl-min"
-        title="Minimize"
-        aria-label="Minimize"
-        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); minimizeWindow(); }}
-      />
-    </div>
-  );
-
   if (showTour) {
     return (
       <div className="panel panel-setup">
-        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
-          <TrafficLights />
-          <span className="brand" data-tauri-drag-region>pluks</span>
-        </div>
+        <Titlebar />
         <OnboardingTour onDone={dismissTour} />
       </div>
     );
@@ -470,9 +484,7 @@ export default function App() {
   if (needsSetup) {
     return (
       <div className="panel panel-setup">
-        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
-          <TrafficLights />
-          <span className="brand" data-tauri-drag-region>pluks</span>
+        <Titlebar>
           {!IS_MAC && (
             <button
               className="setup-dismiss"
@@ -481,7 +493,7 @@ export default function App() {
               onClick={hideWindow}
             >Hide ✕</button>
           )}
-        </div>
+        </Titlebar>
         <SetupScreen hasAccessibility={hasAccessibility} hasInputMonitoring={hasInputMonitoring} onCheck={checkPermissions} />
       </div>
     );
@@ -490,11 +502,9 @@ export default function App() {
   if (prefsOpen) {
     return (
       <div className="panel">
-        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
-          <TrafficLights />
-          <span className="brand" data-tauri-drag-region>pluks</span>
+        <Titlebar>
           <button className="gear-btn active" title="Close preferences" onClick={() => setPrefsOpen(false)}>←</button>
-        </div>
+        </Titlebar>
         <PreferencesScreen onClose={() => setPrefsOpen(false)} />
       </div>
     );
@@ -502,9 +512,7 @@ export default function App() {
 
   return (
     <div className="panel">
-      <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
-        <TrafficLights />
-        <span className="brand" data-tauri-drag-region>pluks</span>
+      <Titlebar>
         <span className="count" data-tauri-drag-region>{items.length} / 100</span>
         <button
           className="gear-btn"
@@ -512,7 +520,7 @@ export default function App() {
           onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
           onClick={() => setPrefsOpen(true)}
         >⚙</button>
-      </div>
+      </Titlebar>
 
       <div className="search-row">
         <input
@@ -545,7 +553,6 @@ export default function App() {
         <button className="btn-clear" onClick={handleClear}>Clear all</button>
         <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close · {SHORTCUT_HINT} toggle</span>
       </div>
-
     </div>
   );
 }
