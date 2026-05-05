@@ -13,7 +13,7 @@ interface Props {
 
 function timeAgo(ts: string, now: number): string {
   // SQLite stores "YYYY-MM-DD HH:MM:SS" in UTC — append Z so Date parses it as UTC.
-  const ms = new Date(ts.includes("T") ? ts : ts + "Z").getTime();
+  const ms = tsMillis(ts);
   const secs = Math.max(0, Math.floor((now - ms) / 1000));
   if (secs < 60) return "just now";
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
@@ -24,6 +24,18 @@ function timeAgo(ts: string, now: number): string {
 function isTypingTarget(target: EventTarget | null): boolean {
   const t = target as HTMLElement | null;
   return t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
+}
+
+// If the top item landed within this window before the panel opened we
+// assume it's the user's "destination selection" — i.e. they highlighted
+// existing text in a target field intending to overwrite it — and skip it
+// so Enter / Cmd-release pastes the previously-captured item instead.
+// Tuned to cover the typical select→trigger gesture without surprising users
+// who actually want to repaste their newest item.
+const FRESH_SELECTION_SKIP_MS = 5_000;
+
+function tsMillis(copiedAt: string): number {
+  return new Date(copiedAt.includes("T") ? copiedAt : copiedAt + "Z").getTime();
 }
 
 export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, onCopyTransformed, onNavigate }: Props) {
@@ -82,7 +94,11 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
     return () => window.removeEventListener("keydown", handler);
   }, [items, onCopy, onDelete, onNavigate]);
 
-  useEffect(() => { setActive(0); }, [items]);
+  useEffect(() => {
+    if (items.length < 2) { setActive(0); return; }
+    const topAge = Date.now() - tsMillis(items[0].copied_at);
+    setActive(topAge >= 0 && topAge < FRESH_SELECTION_SKIP_MS ? 1 : 0);
+  }, [items]);
 
   useEffect(() => {
     const el = listRef.current?.children[active] as HTMLElement | undefined;
