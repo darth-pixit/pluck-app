@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,6 +12,16 @@ import "./index.css";
 
 // Direct Tauri window API — never goes through Rust invoke, always reliable.
 const hideWindow = () => getCurrentWindow().hide();
+const minimizeWindow = () => getCurrentWindow().hide();
+
+// Programmatic drag — more reliable than data-tauri-drag-region on NSPanel,
+// especially when another app (e.g. System Settings during permission grants)
+// is the foreground app and our window isn't yet key.
+const startDrag = (e: ReactMouseEvent) => {
+  if ((e.target as HTMLElement).closest("button,input,a")) return;
+  if (e.button !== 0) return;
+  getCurrentWindow().startDragging().catch(() => { /* dragging unsupported — fine */ });
+};
 
 // Platform detection (synchronous, fine for static UI/keybinding choices).
 // userAgentData.platform is the modern source; navigator.platform is the
@@ -171,9 +181,13 @@ export default function App() {
   const [prefsOpen, setPrefsOpen]                   = useState(false);
   // When true: opened via CMD+Shift+V; releasing CMD auto-pastes the active item.
   const [keyboardMode, setKeyboardMode]             = useState(false);
-  const [showTour, setShowTour]                     = useState(false);
-  // null = before-first-run sentinel; flips to a boolean after the initial pass.
-  const wasInSetupRef                               = useRef<boolean | null>(null);
+  // Onboarding tour shows before the permission setup screen on a fresh
+  // install — the user benefits from understanding what they're granting
+  // permissions for before being prompted. Initialised lazily from
+  // localStorage so first-run users land on the tour, not the perms screen.
+  const [showTour, setShowTour]                     = useState(() => {
+    try { return !localStorage.getItem(ONBOARDING_KEY); } catch { return false; }
+  });
   const keyboardModeTime                            = useRef(0);
   const lastShownAt                                 = useRef(0);
   const activeItemIdRef                             = useRef<number | null>(null);
@@ -233,23 +247,20 @@ export default function App() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [needsSetup, checkPermissions]);
 
-  // Drop always-on-top while setup is showing so the panel doesn't float over
-  // System Settings during permission grants; restore once setup is done.
-  // Skip the very first run — at mount we haven't verified perms yet, and
-  // pre-empting the Rust-side configure_overlay_window default would briefly
-  // demote the panel for already-permissioned users.
+  // Drop always-on-top while the permission setup screen is showing so the
+  // panel doesn't float over System Settings during grants; restore once
+  // setup is done. Tour-in-progress doesn't open System Settings, so it
+  // can stay always-on-top.
   useEffect(() => {
-    if (wasInSetupRef.current === null) {
-      wasInSetupRef.current = needsSetup;
-      return;
-    }
-    getCurrentWindow().setAlwaysOnTop(!needsSetup).catch(console.warn);
-    if (wasInSetupRef.current && !needsSetup && !localStorage.getItem(ONBOARDING_KEY)) {
-      setShowTour(true);
-      track("onboarding_started", {});
-    }
-    wasInSetupRef.current = needsSetup;
-  }, [needsSetup]);
+    const showingPerms = needsSetup && !showTour;
+    getCurrentWindow().setAlwaysOnTop(!showingPerms).catch(console.warn);
+  }, [needsSetup, showTour]);
+
+  // Fire onboarding_started once per fresh install when the tour first appears.
+  useEffect(() => {
+    if (showTour) track("onboarding_started", {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dismissTour = useCallback((reason: "skipped" | "completed") => {
     try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch { /* private mode / quota */ }
@@ -425,14 +436,43 @@ export default function App() {
     ? items.filter(i => i.content.toLowerCase().includes(query.toLowerCase()))
     : items;
 
+  // Standard macOS traffic-light cluster — close + minimize, per HIG.
+  // We omit zoom/maximize because the panel is fixed-size by design.
+  const TrafficLights = () => (
+    <div className="traffic-lights">
+      <button
+        className="tl tl-close"
+        title="Close"
+        aria-label="Close"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }}
+      />
+      <button
+        className="tl tl-min"
+        title="Minimize"
+        aria-label="Minimize"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); minimizeWindow(); }}
+      />
+    </div>
+  );
+
+  if (showTour) {
+    return (
+      <div className="panel panel-setup">
+        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
+          <TrafficLights />
+          <span className="brand" data-tauri-drag-region>pluks</span>
+        </div>
+        <OnboardingTour onDone={dismissTour} />
+      </div>
+    );
+  }
+
   if (needsSetup) {
     return (
       <div className="panel panel-setup">
-        <div className="titlebar" data-tauri-drag-region>
-          <div className="traffic-lights">
-            <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
-          </div>
-          <span className="brand">pluks</span>
+        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
+          <TrafficLights />
+          <span className="brand" data-tauri-drag-region>pluks</span>
           {!IS_MAC && (
             <button
               className="setup-dismiss"
@@ -450,11 +490,9 @@ export default function App() {
   if (prefsOpen) {
     return (
       <div className="panel">
-        <div className="titlebar" data-tauri-drag-region>
-          <div className="traffic-lights">
-            <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
-          </div>
-          <span className="brand">pluks</span>
+        <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
+          <TrafficLights />
+          <span className="brand" data-tauri-drag-region>pluks</span>
           <button className="gear-btn active" title="Close preferences" onClick={() => setPrefsOpen(false)}>←</button>
         </div>
         <PreferencesScreen onClose={() => setPrefsOpen(false)} />
@@ -464,12 +502,10 @@ export default function App() {
 
   return (
     <div className="panel">
-      <div className="titlebar" data-tauri-drag-region>
-        <div className="traffic-lights">
-          <button className="tl tl-close" title="Hide" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideWindow(); }} />
-        </div>
-        <span className="brand">pluks</span>
-        <span className="count">{items.length} / 100</span>
+      <div className="titlebar" data-tauri-drag-region onMouseDown={startDrag}>
+        <TrafficLights />
+        <span className="brand" data-tauri-drag-region>pluks</span>
+        <span className="count" data-tauri-drag-region>{items.length} / 100</span>
         <button
           className="gear-btn"
           title="Preferences"
@@ -510,7 +546,6 @@ export default function App() {
         <span className="hint">↑↓ navigate · ↩ copy · ⌫ delete · esc close · {SHORTCUT_HINT} toggle</span>
       </div>
 
-      {showTour && <OnboardingTour onDone={dismissTour} />}
     </div>
   );
 }

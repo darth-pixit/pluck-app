@@ -70,7 +70,8 @@ body:not(.platform-mac) .traffic-lights { display: none; }
 }
 
 .tl-close { background: #FF5F57; }
-.tl-close:hover { filter: brightness(0.8); }
+.tl-min   { background: #FEBC2E; }
+.tl:hover { filter: brightness(0.85); }
 
 .brand {
   font-size: 14px;
