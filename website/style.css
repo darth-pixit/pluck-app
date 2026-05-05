@@ -411,10 +411,19 @@ a:hover { text-decoration: underline; }
 
 .modal-field select {
   appearance: none;
+  /* Render the native dropdown popup in dark mode on Windows/Linux Chromium —
+     without this, <option>s inherit our white text but sit on the OS-default
+     white background, rendering invisible. */
+  color-scheme: dark;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23ffffff80' d='M6 8L0 0h12z'/></svg>");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
+}
+
+.modal-field select option {
+  background-color: var(--surface);
+  color: var(--text);
 }
 
 .modal-submit {
