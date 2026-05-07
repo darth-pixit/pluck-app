@@ -93,12 +93,14 @@ pub fn focus_is_editable() -> bool {
             element: AXUIElementRef,
             timeout_in_seconds: f32,
         ) -> AXError;
-
-        static kAXFocusedUIElementAttribute: CFStringRef;
-        static kAXRoleAttribute: CFStringRef;
-        static kAXValueAttribute: CFStringRef;
     }
 
+    // We deliberately don't `extern static` the kAX* CFString constants —
+    // declaring them in a function-local extern block leaves them as
+    // unresolved Mach-O symbols at link time even with -framework
+    // ApplicationServices on the line. We construct equivalent CFStrings
+    // from their documented literal values instead; the AX APIs only care
+    // about string identity, not which symbol they came from.
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFRelease(cf: CFTypeRef);
@@ -108,11 +110,41 @@ pub fn focus_is_editable() -> bool {
             buffer_size: isize,
             encoding: u32,
         ) -> u8;
+        fn CFStringCreateWithBytes(
+            alloc: CFTypeRef,
+            bytes: *const u8,
+            num_bytes: isize,
+            encoding: u32,
+            is_external_representation: u8,
+        ) -> CFStringRef;
+    }
+
+    unsafe fn make_cfstr(bytes: &[u8]) -> CFStringRef {
+        CFStringCreateWithBytes(
+            ptr::null(),
+            bytes.as_ptr(),
+            bytes.len() as isize,
+            K_CF_STRING_ENCODING_UTF8,
+            0,
+        )
     }
 
     unsafe {
+        let attr_focused = make_cfstr(b"AXFocusedUIElement");
+        let attr_role = make_cfstr(b"AXRole");
+        let attr_value = make_cfstr(b"AXValue");
+        if attr_focused.is_null() || attr_role.is_null() || attr_value.is_null() {
+            if !attr_focused.is_null() { CFRelease(attr_focused); }
+            if !attr_role.is_null() { CFRelease(attr_role); }
+            if !attr_value.is_null() { CFRelease(attr_value); }
+            return false;
+        }
+
         let system = AXUIElementCreateSystemWide();
         if system.is_null() {
+            CFRelease(attr_focused);
+            CFRelease(attr_role);
+            CFRelease(attr_value);
             return false;
         }
         // Cap each AX round-trip — an unresponsive target app must not stall
@@ -120,11 +152,13 @@ pub fn focus_is_editable() -> bool {
         AXUIElementSetMessagingTimeout(system, 0.1);
 
         let mut focused: CFTypeRef = ptr::null();
-        let err =
-            AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute, &mut focused);
+        let err = AXUIElementCopyAttributeValue(system, attr_focused, &mut focused);
         CFRelease(system);
 
         if err != KAX_ERROR_SUCCESS || focused.is_null() {
+            CFRelease(attr_focused);
+            CFRelease(attr_role);
+            CFRelease(attr_value);
             return false;
         }
         let focused_el = focused as AXUIElementRef;
@@ -133,18 +167,19 @@ pub fn focus_is_editable() -> bool {
         // Strongest signal: the element advertises kAXValueAttribute as
         // settable. That's only true for editable text-bearing roles.
         let mut settable: u8 = 0;
-        let s_err =
-            AXUIElementIsAttributeSettable(focused_el, kAXValueAttribute, &mut settable);
+        let s_err = AXUIElementIsAttributeSettable(focused_el, attr_value, &mut settable);
         if s_err == KAX_ERROR_SUCCESS && settable != 0 {
             CFRelease(focused);
+            CFRelease(attr_focused);
+            CFRelease(attr_role);
+            CFRelease(attr_value);
             return true;
         }
 
         // Fallback: match a known editable role string. Some webviews don't
         // expose attribute-settability but do expose a role.
         let mut role_ref: CFTypeRef = ptr::null();
-        let r_err =
-            AXUIElementCopyAttributeValue(focused_el, kAXRoleAttribute, &mut role_ref);
+        let r_err = AXUIElementCopyAttributeValue(focused_el, attr_role, &mut role_ref);
         let editable = if r_err == KAX_ERROR_SUCCESS && !role_ref.is_null() {
             let mut buf = [0u8; 64];
             let ok = CFStringGetCString(
@@ -176,6 +211,9 @@ pub fn focus_is_editable() -> bool {
         };
 
         CFRelease(focused);
+        CFRelease(attr_focused);
+        CFRelease(attr_role);
+        CFRelease(attr_value);
         editable
     }
 }
