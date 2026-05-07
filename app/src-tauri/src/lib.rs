@@ -4,8 +4,9 @@ mod settings;
 
 use history::{Database, HistoryItem};
 use selection::{
-    activate_pid, ax_is_trusted, frontmost_pid, input_monitoring_granted, read_clipboard,
-    simulate_copy, simulate_paste, start_listener, write_clipboard, Clipboard, SelectionSignal,
+    activate_pid, ax_is_trusted, focus_is_editable, frontmost_pid, input_monitoring_granted,
+    read_clipboard, simulate_copy, simulate_paste, start_listener, write_clipboard, Clipboard,
+    SelectionSignal,
 };
 
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
@@ -22,6 +23,11 @@ use tauri::{
 const WIN_HISTORY: &str = "history";
 const EVT_NEW_SELECTION: &str = "new-selection";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
+// Emitted when the copy processor declines to capture because the user's
+// focus is in an editable text field (drag-to-replace gesture). The
+// frontend forwards this to PostHog as `selection_capture_failed` so we can
+// see the new path firing in the wild without needing local debug builds.
+const EVT_CAPTURE_SUPPRESSED: &str = "capture-suppressed";
 
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
@@ -325,12 +331,27 @@ fn start_copy_processor(
                 continue;
             }
 
+            // If the user is selecting inside an editable text field, treat
+            // it as a "replace" gesture — don't auto-copy. Otherwise we'd
+            // overwrite their clipboard with the destination text and pollute
+            // history. The detector returns false when AX can't classify the
+            // focus, so unsupported apps fall back to the prior behavior.
+            if focus_is_editable() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
+                continue;
+            }
+
             let before = read_clipboard(&mut clip);
             thread::sleep(Duration::from_millis(80));
 
-            // Re-check just before firing Cmd+C: the panel may have appeared or the
-            // user may have toggled auto-copy off during the sleep.
+            // Re-check just before firing Cmd+C: the panel may have appeared, the
+            // user may have toggled auto-copy off, or focus may have moved into
+            // an editable target during the sleep.
             if !state.watcher_enabled() || panel_visible(&app_handle) {
+                continue;
+            }
+            if focus_is_editable() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
                 continue;
             }
 

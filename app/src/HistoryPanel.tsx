@@ -26,12 +26,10 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
 }
 
-// If the top item landed within this window before the panel opened we
-// assume it's the user's "destination selection" — i.e. they highlighted
-// existing text in a target field intending to overwrite it — and skip it
-// so Enter / Cmd-release pastes the previously-captured item instead.
-// Tuned to cover the typical select→trigger gesture without surprising users
-// who actually want to repaste their newest item.
+// Fallback for apps the Rust-side AX detector can't classify (some webviews,
+// non-AX-aware native apps): if the top item landed within this window we
+// assume it was a destination selection and default the active row to the
+// item below it. With the AX detector in place this should rarely trigger.
 const FRESH_SELECTION_SKIP_MS = 5_000;
 
 function tsMillis(copiedAt: string): number {
