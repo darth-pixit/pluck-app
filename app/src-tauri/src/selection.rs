@@ -157,9 +157,16 @@ pub fn focus_is_editable() -> bool {
             if ok != 0 {
                 let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
                 let role = std::str::from_utf8(&buf[..nul]).unwrap_or("");
+                // AXSecureTextField included so we never auto-copy out of a
+                // password input — pre-existing privacy gap that this fix
+                // closes by reusing the same suppression path.
                 matches!(
                     role,
-                    "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField"
+                    "AXTextField"
+                        | "AXTextArea"
+                        | "AXComboBox"
+                        | "AXSearchField"
+                        | "AXSecureTextField"
                 )
             } else {
                 false

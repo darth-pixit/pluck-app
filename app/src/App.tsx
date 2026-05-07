@@ -356,6 +356,17 @@ export default function App() {
     return () => { unlisten.then(fn => fn()); };
   }, []);
 
+  // The Rust copy processor emits `capture-suppressed` when it declines to
+  // auto-copy because focus is inside an editable text field (drag-to-replace
+  // gesture). Forward it as analytics so we can see the AX path firing in
+  // the wild.
+  useEffect(() => {
+    const unlisten = listen<string>("capture-suppressed", event => {
+      track("selection_capture_failed", { reason: event.payload || "unknown" });
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
   // Rust emits "keyboard-open" when CMD+Shift+V opens the panel.
   useEffect(() => {
     const unlisten = listen("keyboard-open", () => {

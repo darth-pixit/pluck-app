@@ -23,6 +23,11 @@ use tauri::{
 const WIN_HISTORY: &str = "history";
 const EVT_NEW_SELECTION: &str = "new-selection";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
+// Emitted when the copy processor declines to capture because the user's
+// focus is in an editable text field (drag-to-replace gesture). The
+// frontend forwards this to PostHog as `selection_capture_failed` so we can
+// see the new path firing in the wild without needing local debug builds.
+const EVT_CAPTURE_SUPPRESSED: &str = "capture-suppressed";
 
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
@@ -332,6 +337,7 @@ fn start_copy_processor(
             // history. The detector returns false when AX can't classify the
             // focus, so unsupported apps fall back to the prior behavior.
             if focus_is_editable() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
                 continue;
             }
 
@@ -341,7 +347,11 @@ fn start_copy_processor(
             // Re-check just before firing Cmd+C: the panel may have appeared, the
             // user may have toggled auto-copy off, or focus may have moved into
             // an editable target during the sleep.
-            if !state.watcher_enabled() || panel_visible(&app_handle) || focus_is_editable() {
+            if !state.watcher_enabled() || panel_visible(&app_handle) {
+                continue;
+            }
+            if focus_is_editable() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
                 continue;
             }
 
