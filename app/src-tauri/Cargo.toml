@@ -9,6 +9,13 @@ edition = "2021"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Off by default. `cargo tauri build --features diag` (or
+# `cargo build --features diag` for a quick lib check) ships a binary that
+# writes per-copy timing + pasteboard-format probes to stderr. Used to
+# diagnose large-sheet copy failures without changing production behavior.
+diag = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

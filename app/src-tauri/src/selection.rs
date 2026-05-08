@@ -577,7 +577,21 @@ mod mac_tap {
                     };
 
                     if is_drag || is_multi {
-                        let _ = ctx.tx.try_send(SelectionSignal);
+                        let r = ctx.tx.try_send(SelectionSignal);
+                        #[cfg(feature = "diag")]
+                        match &r {
+                            Ok(()) => crate::diag_log!(
+                                "tap: SelectionSignal sent (gesture={})",
+                                if is_drag { "drag" } else { "multi" }
+                            ),
+                            Err(std::sync::mpsc::TrySendError::Full(_)) => crate::diag_log!(
+                                "tap: SelectionSignal DROPPED — channel full (processor mid-cycle)"
+                            ),
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                                crate::diag_log!("tap: SelectionSignal DROPPED — disconnected")
+                            }
+                        }
+                        let _ = r;
                     }
                 }
             }
@@ -586,14 +600,36 @@ mod mac_tap {
                 let flags = CGEventGetFlags(ev) & (FLAG_CMD | FLAG_SHIFT | FLAG_CTRL | FLAG_OPT);
                 // Cmd+A (no other modifiers) counts as "select all" → trigger capture.
                 if kc == KEYCODE_A && flags == FLAG_CMD {
-                    let _ = ctx.tx.try_send(SelectionSignal);
+                    let r = ctx.tx.try_send(SelectionSignal);
+                    #[cfg(feature = "diag")]
+                    match &r {
+                        Ok(()) => crate::diag_log!("tap: SelectionSignal sent (Cmd+A)"),
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => crate::diag_log!(
+                            "tap: SelectionSignal DROPPED on Cmd+A — channel full"
+                        ),
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            crate::diag_log!("tap: SelectionSignal DROPPED on Cmd+A — disconnected")
+                        }
+                    }
+                    let _ = r;
                 }
                 // Cmd+C (no other modifiers) is a manual copy gesture. lib.rs
                 // distinguishes user-driven Cmd+C from our own simulate_copy()
                 // synthetic events via a timestamp gate — this listener can't
                 // tell them apart from the OS event stream alone.
                 if kc as u16 == KEYCODE_C && flags == FLAG_CMD {
-                    let _ = ctx.tx_manual.try_send(ManualCopySignal);
+                    let r = ctx.tx_manual.try_send(ManualCopySignal);
+                    #[cfg(feature = "diag")]
+                    match &r {
+                        Ok(()) => crate::diag_log!("tap: ManualCopySignal sent"),
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            crate::diag_log!("tap: ManualCopySignal DROPPED — channel full")
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            crate::diag_log!("tap: ManualCopySignal DROPPED — disconnected")
+                        }
+                    }
+                    let _ = r;
                 }
             }
             _ => {}
@@ -702,7 +738,21 @@ mod rdev_listener {
                     Instant::now()
                 };
                 if is_drag || is_multi {
-                    let _ = tx.try_send(SelectionSignal);
+                    let r = tx.try_send(SelectionSignal);
+                    #[cfg(feature = "diag")]
+                    match &r {
+                        Ok(()) => crate::diag_log!(
+                            "rdev: SelectionSignal sent (gesture={})",
+                            if is_drag { "drag" } else { "multi" }
+                        ),
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => crate::diag_log!(
+                            "rdev: SelectionSignal DROPPED — channel full (processor mid-cycle)"
+                        ),
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            crate::diag_log!("rdev: SelectionSignal DROPPED — disconnected")
+                        }
+                    }
+                    let _ = r;
                 }
             }
             EventType::KeyPress(k) => match k {
@@ -712,12 +762,38 @@ mod rdev_listener {
                 Key::MetaLeft | Key::MetaRight => meta = true,
                 Key::KeyA => {
                     if ctrl && !shift && !alt && !meta {
-                        let _ = tx.try_send(SelectionSignal);
+                        let r = tx.try_send(SelectionSignal);
+                        #[cfg(feature = "diag")]
+                        match &r {
+                            Ok(()) => crate::diag_log!("rdev: SelectionSignal sent (Ctrl+A)"),
+                            Err(std::sync::mpsc::TrySendError::Full(_)) => crate::diag_log!(
+                                "rdev: SelectionSignal DROPPED on Ctrl+A — channel full"
+                            ),
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                                crate::diag_log!(
+                                    "rdev: SelectionSignal DROPPED on Ctrl+A — disconnected"
+                                )
+                            }
+                        }
+                        let _ = r;
                     }
                 }
                 Key::KeyC => {
                     if ctrl && !shift && !alt && !meta {
-                        let _ = tx_manual.try_send(ManualCopySignal);
+                        let r = tx_manual.try_send(ManualCopySignal);
+                        #[cfg(feature = "diag")]
+                        match &r {
+                            Ok(()) => crate::diag_log!("rdev: ManualCopySignal sent"),
+                            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                                crate::diag_log!("rdev: ManualCopySignal DROPPED — channel full")
+                            }
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                                crate::diag_log!(
+                                    "rdev: ManualCopySignal DROPPED — disconnected"
+                                )
+                            }
+                        }
+                        let _ = r;
                     }
                 }
                 _ => {}
@@ -795,14 +871,26 @@ pub fn simulate_paste() {
 pub use arboard::Clipboard;
 
 pub fn read_clipboard(clip: &mut Option<Clipboard>) -> Option<String> {
+    #[cfg(feature = "diag")]
+    let t0 = Instant::now();
     if clip.is_none() {
         *clip = Clipboard::new().ok();
     }
-    clip.as_mut()?
-        .get_text()
-        .ok()
+    let result: Option<String> = clip
+        .as_mut()
+        .and_then(|c| c.get_text().ok())
         .map(|s| s.trim_end_matches(['\r', '\n', ' ', '\t']).to_string())
-        .filter(|s| !s.trim().is_empty())
+        .filter(|s| !s.trim().is_empty());
+    #[cfg(feature = "diag")]
+    crate::diag_log!(
+        "  read_clipboard {}ms -> {}",
+        t0.elapsed().as_millis(),
+        match result.as_ref() {
+            Some(s) => format!("Some({}b)", s.len()),
+            None => "None".to_string(),
+        }
+    );
+    result
 }
 
 pub fn write_clipboard(text: &str) -> bool {
@@ -810,4 +898,50 @@ pub fn write_clipboard(text: &str) -> bool {
         .ok()
         .and_then(|mut c| c.set_text(text).ok())
         .is_some()
+}
+
+// Diagnostic-only: dumps the UTI strings on the general NSPasteboard. Used
+// to test the "WPS publishes only HTML/CSV, never plain text" hypothesis —
+// arboard::get_text() returns Err in that case, which makes the 600 ms
+// poll loop see no change and silently abandon the capture.
+#[cfg(all(target_os = "macos", feature = "diag"))]
+pub fn diag_pasteboard_types() -> Vec<String> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use std::ffi::CStr;
+
+    extern "C" {
+        fn objc_getClass(name: *const u8) -> *mut AnyObject;
+    }
+
+    unsafe {
+        let cls = objc_getClass(b"NSPasteboard\0".as_ptr());
+        if cls.is_null() {
+            return vec![];
+        }
+        let pb: *mut AnyObject = msg_send![cls, generalPasteboard];
+        if pb.is_null() {
+            return vec![];
+        }
+        let types: *mut AnyObject = msg_send![pb, types];
+        if types.is_null() {
+            return vec![];
+        }
+        let count: usize = msg_send![types, count];
+        let mut out = Vec::with_capacity(count);
+        for i in 0..count {
+            let s: *mut AnyObject = msg_send![types, objectAtIndex: i];
+            if s.is_null() {
+                continue;
+            }
+            let cstr: *const i8 = msg_send![s, UTF8String];
+            if cstr.is_null() {
+                continue;
+            }
+            if let Ok(rs) = CStr::from_ptr(cstr).to_str() {
+                out.push(rs.to_string());
+            }
+        }
+        out
+    }
 }

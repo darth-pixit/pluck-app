@@ -2,6 +2,30 @@ mod history;
 mod selection;
 mod settings;
 
+// Stderr-only timing probe gated behind the `diag` cargo feature. Compiles
+// to nothing in production builds. Used to investigate large-sheet copy
+// failures (WPS, Excel) without changing any timing or behavior.
+#[cfg(feature = "diag")]
+#[macro_export]
+macro_rules! diag_log {
+    ($($arg:tt)*) => {{
+        eprintln!(
+            "[pluks-diag {}us] {}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_micros())
+                .unwrap_or(0),
+            format_args!($($arg)*)
+        )
+    }};
+}
+
+#[cfg(not(feature = "diag"))]
+#[macro_export]
+macro_rules! diag_log {
+    ($($arg:tt)*) => {{}};
+}
+
 use history::{Database, HistoryItem};
 use selection::{
     activate_pid, ax_is_trusted, cursor_pos, focus_is_editable, frontmost_pid,
@@ -421,9 +445,20 @@ fn start_copy_processor(
         // Reuse a single Clipboard handle across the polling loop instead of constructing
         // ~25 fresh instances per selection.
         let mut clip: Option<Clipboard> = Clipboard::new().ok();
+        #[cfg(feature = "diag")]
+        let mut signal_count: u64 = 0;
 
         for SelectionSignal in rx {
+            #[cfg(feature = "diag")]
+            {
+                signal_count += 1;
+            }
+            #[cfg(feature = "diag")]
+            let cycle_start = Instant::now();
+            crate::diag_log!("[copy #{}] signal received", signal_count);
+
             if !state.watcher_enabled() || panel_visible(&app_handle) {
+                crate::diag_log!("[copy #{}] skip: watcher_off_or_panel_visible", signal_count);
                 continue;
             }
 
@@ -432,21 +467,66 @@ fn start_copy_processor(
             // overwrite their clipboard with the destination text and pollute
             // history. The detector returns false when AX can't classify the
             // focus, so unsupported apps fall back to the prior behavior.
-            if focus_is_editable() {
+            #[cfg(feature = "diag")]
+            let ax_t0 = Instant::now();
+            let editable = focus_is_editable();
+            crate::diag_log!(
+                "[copy #{}] focus_is_editable={} ({}ms)",
+                signal_count,
+                editable,
+                ax_t0.elapsed().as_millis()
+            );
+            if editable {
                 let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
                 continue;
             }
 
+            #[cfg(feature = "diag")]
+            let rc_t0 = Instant::now();
             let before = read_clipboard(&mut clip);
+            crate::diag_log!(
+                "[copy #{}] read_clipboard before -> {} ({}ms)",
+                signal_count,
+                match before.as_ref() {
+                    Some(s) => format!("Some({}b)", s.len()),
+                    None => "None".to_string(),
+                },
+                rc_t0.elapsed().as_millis()
+            );
+
+            #[cfg(all(target_os = "macos", feature = "diag"))]
+            crate::diag_log!(
+                "[copy #{}] pasteboard pre-sleep types: {:?}",
+                signal_count,
+                selection::diag_pasteboard_types()
+            );
+
+            #[cfg(feature = "diag")]
+            let sleep_t0 = Instant::now();
             thread::sleep(Duration::from_millis(80));
+            crate::diag_log!(
+                "[copy #{}] pre-copy sleep observed: {}ms",
+                signal_count,
+                sleep_t0.elapsed().as_millis()
+            );
 
             // Re-check just before firing Cmd+C: the panel may have appeared, the
             // user may have toggled auto-copy off, or focus may have moved into
             // an editable target during the sleep.
             if !state.watcher_enabled() || panel_visible(&app_handle) {
+                crate::diag_log!("[copy #{}] skip after sleep: watcher_off_or_panel_visible", signal_count);
                 continue;
             }
-            if focus_is_editable() {
+            #[cfg(feature = "diag")]
+            let ax_t1 = Instant::now();
+            let editable2 = focus_is_editable();
+            crate::diag_log!(
+                "[copy #{}] focus_is_editable recheck={} ({}ms)",
+                signal_count,
+                editable2,
+                ax_t1.elapsed().as_millis()
+            );
+            if editable2 {
                 let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
                 continue;
             }
@@ -454,28 +534,80 @@ fn start_copy_processor(
             // Stamp BEFORE firing so the manual-copy listener can ignore the
             // synthetic Cmd+C this is about to generate.
             state.mark_synthetic_copy();
+            #[cfg(feature = "diag")]
+            let copy_t = Instant::now();
             simulate_copy();
+            crate::diag_log!("[copy #{}] simulate_copy posted", signal_count);
 
             // Adaptive wait: poll until clipboard changes or 600 ms elapses.
             let after = {
                 let deadline = Instant::now() + Duration::from_millis(600);
                 let mut latest = read_clipboard(&mut clip);
+                #[cfg(feature = "diag")]
+                let mut iter: u32 = 0;
+                #[cfg(feature = "diag")]
+                let mut changed_at_ms: Option<u128> = if latest.as_deref() != before.as_deref() {
+                    Some(copy_t.elapsed().as_millis())
+                } else {
+                    None
+                };
                 while latest.as_deref() == before.as_deref() && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(25));
                     latest = read_clipboard(&mut clip);
+                    #[cfg(feature = "diag")]
+                    {
+                        iter += 1;
+                        if changed_at_ms.is_none() && latest.as_deref() != before.as_deref() {
+                            changed_at_ms = Some(copy_t.elapsed().as_millis());
+                        }
+                    }
                 }
+                crate::diag_log!(
+                    "[copy #{}] poll done: iters={}, changed_at={:?}ms, latest={}",
+                    signal_count,
+                    iter,
+                    changed_at_ms,
+                    match latest.as_ref() {
+                        Some(s) => format!("Some({}b)", s.len()),
+                        None => "None".to_string(),
+                    }
+                );
+                #[cfg(all(target_os = "macos", feature = "diag"))]
+                crate::diag_log!(
+                    "[copy #{}] pasteboard post-poll types: {:?}",
+                    signal_count,
+                    selection::diag_pasteboard_types()
+                );
                 latest
             };
 
             if let Some(text) = after {
                 if before.as_deref() != Some(&text) {
+                    #[cfg(feature = "diag")]
+                    let db_t0 = Instant::now();
                     let item = state.db().insert(&text);
+                    crate::diag_log!(
+                        "[copy #{}] db insert: {} ({}ms, {}b)",
+                        signal_count,
+                        if item.is_ok() { "ok" } else { "err" },
+                        db_t0.elapsed().as_millis(),
+                        text.len()
+                    );
                     if let Ok(item) = item {
                         state.mark_capture();
                         let _ = app_handle.emit(EVT_NEW_SELECTION, &item);
                     }
+                } else {
+                    crate::diag_log!("[copy #{}] poll text matched 'before' — no-op", signal_count);
                 }
+            } else {
+                crate::diag_log!("[copy #{}] no text captured (poll returned None)", signal_count);
             }
+            crate::diag_log!(
+                "[copy #{}] cycle total {}ms",
+                signal_count,
+                cycle_start.elapsed().as_millis()
+            );
         }
     });
 }
