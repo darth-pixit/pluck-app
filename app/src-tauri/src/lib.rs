@@ -9,6 +9,7 @@ use selection::{
     write_clipboard, Clipboard, ManualCopySignal, SelectionSignal,
 };
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -33,6 +34,10 @@ const NUDGE_OFFSET_X: f64 = 18.0;
 const NUDGE_OFFSET_Y: f64 = 18.0;
 const NUDGE_WIDTH: f64 = 220.0;
 const NUDGE_HEIGHT: f64 = 44.0;
+// Visible lifetime of one nudge. CSS keyframes in NudgeView assume the
+// pill is in the DOM for this long; bumping this requires bumping the
+// fade-out keyframe delay too. Single source of truth.
+const NUDGE_LIFETIME_MS: u64 = 1100;
 // Emitted when the copy processor declines to capture because the user's
 // focus is in an editable text field (drag-to-replace gesture). The
 // frontend forwards this to PostHog as `selection_capture_failed` so we can
@@ -73,6 +78,12 @@ pub struct AppState {
     /// CGEventTap also sees that synthetic Cmd+C; without this guard it
     /// would be miscounted as a manual copy.
     pub last_synthetic_copy_at: Arc<Mutex<Option<Instant>>>,
+    /// Monotonic ID for the most-recently-shown nudge. Each show_nudge
+    /// increments it; the hide task captures the value at show-time and
+    /// only hides if it's still current — otherwise a fast-second nudge
+    /// would have its window yanked out from under it by the prior
+    /// nudge's stale hide task.
+    pub nudge_gen: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -150,15 +161,16 @@ fn check_accessibility() -> bool {
 
 /// Position the dedicated nudge window near the cursor and surface a
 /// `nudge-show` event to its webview so the React component renders
-/// the appropriate copy. The window auto-hides on its own after the
-/// fade — we just need to show it once and let the webview drive the
-/// timeline. Idempotent: re-fires while already visible just retarget
-/// position + payload, so back-to-back nudges don't queue.
+/// the appropriate copy. Re-firing while a previous nudge is still
+/// fading retargets position + payload and bumps the generation
+/// counter so the prior hide task no-ops instead of yanking the
+/// window out from under the new nudge.
 #[tauri::command]
-fn show_nudge(app: AppHandle, kind: String, text: String) {
+fn show_nudge(app: AppHandle, state: State<Arc<AppState>>, kind: String, text: String) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
         return;
     };
+    let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let (cx, cy) = cursor_pos();
     let _ = win.set_position(tauri::LogicalPosition::new(
         cx + NUDGE_OFFSET_X,
@@ -166,21 +178,18 @@ fn show_nudge(app: AppHandle, kind: String, text: String) {
     ));
     let _ = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT));
     let _ = win.show();
-    // Raise above other panels — alwaysOnTop in tauri.conf isn't always
-    // enough on macOS when the window was hidden first.
-    let _ = win.set_always_on_top(true);
-    // Tell the webview which copy to render. Done after show() because
-    // the listener is already mounted from the prior session — webview
-    // doesn't reload between nudges.
     let _ = win.emit(
         EVT_NUDGE_SHOW,
         serde_json::json!({ "kind": kind, "text": text }),
     );
-    // Auto-hide after the fade window so the OS reclaims compositor
-    // resources rather than us leaving a transparent window resident.
+
     let app_for_hide = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1100));
+    let gen_arc = state.nudge_gen.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(NUDGE_LIFETIME_MS));
+        if gen_arc.load(Ordering::SeqCst) != my_gen {
+            return;
+        }
         if let Some(w) = app_for_hide.get_webview_window(WIN_NUDGE) {
             let _ = w.hide();
         }
@@ -576,6 +585,7 @@ pub fn run() {
                 target_pid: Arc::new(Mutex::new(None)),
                 last_capture_at: Arc::new(Mutex::new(None)),
                 last_synthetic_copy_at: Arc::new(Mutex::new(None)),
+                nudge_gen: Arc::new(AtomicU64::new(0)),
             });
             app.manage(state.clone());
 

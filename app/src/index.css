@@ -688,7 +688,11 @@ body.nudge-body {
   letter-spacing: 0.1px;
   white-space: nowrap;
   box-shadow: 0 6px 18px rgba(0,0,0,0.45), 0 0 0 1px rgba(252,76,2,0.12);
-  animation: nudge-pop .28s cubic-bezier(.2,.9,.3,1.1), nudge-out .25s ease-in 800ms forwards;
+  /* pop-in over 280ms, hold for ~520ms, fade-out over 300ms ending at 1100ms.
+     Matches DEFAULT_DURATION_MS in NudgeView.tsx and NUDGE_LIFETIME_MS in lib.rs.
+     `forwards` deliberately omitted: the React component unmounts the pill
+     at 1100ms anyway, so we don't need to pin the final state. */
+  animation: nudge-pop .28s cubic-bezier(.2,.9,.3,1.1), nudge-out .3s ease-in 800ms;
 }
 
 .nudge-corrective .nudge-pill {
