@@ -136,6 +136,26 @@
 
   // ── Mouse tracking ────────────────────────────────────────────────────────
 
+  // Read the current selection inside an <input>/<textarea>. Such fields don't
+  // contribute to window.getSelection(); they expose selection via their own
+  // selectionStart/End pair. Wrapped in try/catch because some input types
+  // (number, email in some engines) throw on selectionStart access.
+  function getFieldSelection(el) {
+    if (!el) return "";
+    const tag = el.tagName;
+    if (tag !== "INPUT" && tag !== "TEXTAREA") return "";
+    // Never read masked credentials, even if the user explicitly selected them.
+    if (tag === "INPUT" && (el.type || "").toLowerCase() === "password") return "";
+    try {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      if (start == null || end == null || end <= start) return "";
+      return el.value.substring(start, end);
+    } catch (_) {
+      return "";
+    }
+  }
+
   document.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     pressX = e.clientX;
@@ -156,16 +176,32 @@
     const dy = Math.abs(e.clientY - pressY);
     const isDrag = dx > 4 || dy > 4;
     const isMultiClick = clickCount >= 2;
+    const target = e.target;
+    const tag = target && target.tagName;
+    const isField = tag === "INPUT" || tag === "TEXTAREA";
 
     lastRelease = Date.now();
 
-    if (!isDrag && !isMultiClick) return;
+    // Drag and multi-click are explicit selection gestures. A single click on a
+    // text field is also captured: pages routinely select-all on focus (URL
+    // share boxes, address-bar-style inputs) and the user expects that
+    // highlighted text to land on the clipboard like any other selection. The
+    // synchronous selection check inside the timeout filters out clicks that
+    // merely position the cursor.
+    if (!isDrag && !isMultiClick && !isField) return;
 
     // Small delay to let the browser finalise the selection
     setTimeout(() => {
-      const sel = window.getSelection();
-      if (!sel) return;
-      const text = sel.toString().trim();
+      let text = "";
+      let isFieldSelect = false;
+      if (isField) {
+        text = getFieldSelection(target).trim();
+        isFieldSelect = !!text;
+      }
+      if (!text) {
+        const sel = window.getSelection();
+        if (sel) text = sel.toString().trim();
+      }
       if (!text) return;
 
       // Copy to clipboard
@@ -182,6 +218,7 @@
               char_count_bucket: window.Pluks.bucket(text.length),
               was_drag: isDrag,
               was_multi_click: isMultiClick,
+              was_field_select: isFieldSelect,
               scheme: location.protocol.replace(":", ""),
               content_kind: classify(text)
             });

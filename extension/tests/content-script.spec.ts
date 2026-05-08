@@ -71,6 +71,31 @@ test.describe("Content script", () => {
     expect(matchCount).toBe(1);
   });
 
+  test("single-click on a select-all input captures the field value", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    // Real click — fires mousedown/mouseup and the page's onclick=this.select().
+    await page.locator("#share-url").click();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#__pluks_toast")).toBeVisible();
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history[0].text).toBe("https://example.com/share/abc123");
+  });
+
+  test("single-click on a plain input does not copy", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    // No onclick=select(), so a single click only positions the caret —
+    // selectionStart === selectionEnd, nothing to capture.
+    await page.locator("#plain-input").click();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#__pluks_toast")).not.toBeVisible();
+  });
+
   test("history is capped at 100 entries", async ({ context, baseURL }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
