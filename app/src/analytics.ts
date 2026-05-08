@@ -60,6 +60,13 @@ const SCHEMA: Record<string, readonly string[]> = {
   activation_step_advanced:      ["step"],
   activation_completed:          ["dismiss_reason", "steps_done"],
 
+  // Adaptive muscle-memory nudges (#4). `nudge_shown` fires when an
+  // affirmation/corrective is actually displayed; `nudge_suppressed`
+  // when the decay/throttle logic decides not to. `kind` is the
+  // category, `reason` is the suppression cause for tuning.
+  nudge_shown:                   ["kind", "selects_total_bucket"],
+  nudge_suppressed:              ["kind", "reason"],
+
   history_loaded:                ["item_count", "load_ms"],
   history_item_clicked:          ["position", "kind", "char_count_bucket"],
   history_item_pasted_keyboard:  ["position", "kind"],

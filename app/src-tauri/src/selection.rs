@@ -371,7 +371,7 @@ pub fn activate_pid(pid: i32) {
 struct CGPoint { x: f64, y: f64 }
 
 #[cfg(target_os = "macos")]
-fn cursor_pos() -> (f64, f64) {
+pub fn cursor_pos() -> (f64, f64) {
     use std::ffi::c_void;
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -386,6 +386,47 @@ fn cursor_pos() -> (f64, f64) {
         CFRelease(ev);
         (pt.x, pt.y)
     }
+}
+
+// Windows: GetCursorPos returns screen coordinates in pixels — same
+// space Tauri's set_position consumes when given LogicalPosition with
+// the system DPI factor of 1.0. For HiDPI monitors the conversion
+// happens window-side.
+#[cfg(target_os = "windows")]
+pub fn cursor_pos() -> (f64, f64) {
+    #[repr(C)]
+    struct POINT { x: i32, y: i32 }
+    extern "system" {
+        fn GetCursorPos(p: *mut POINT) -> i32;
+    }
+    let mut p = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut p) == 0 {
+            return (0.0, 0.0);
+        }
+    }
+    (p.x as f64, p.y as f64)
+}
+
+// Linux: shell out to `xdotool getmouselocation`. On Wayland this fails
+// and we degrade to (0,0) — the nudge will land in the top-left
+// corner. Acceptable: Wayland users are already the long tail.
+#[cfg(target_os = "linux")]
+pub fn cursor_pos() -> (f64, f64) {
+    let Ok(out) = std::process::Command::new("xdotool")
+        .arg("getmouselocation")
+        .output()
+    else { return (0.0, 0.0) };
+    if !out.status.success() { return (0.0, 0.0); }
+    let Ok(text) = std::str::from_utf8(&out.stdout) else { return (0.0, 0.0) };
+    let mut x = 0.0_f64;
+    let mut y = 0.0_f64;
+    // Output format: "x:1234 y:567 screen:0 window:..."
+    for tok in text.split_whitespace() {
+        if let Some(v) = tok.strip_prefix("x:") { x = v.parse().unwrap_or(0.0); }
+        if let Some(v) = tok.strip_prefix("y:") { y = v.parse().unwrap_or(0.0); }
+    }
+    (x, y)
 }
 
 // ── macOS: keyboard simulation via CGEvent ────────────────────────────────────
