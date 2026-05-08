@@ -17,6 +17,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Guard against tagging without bumping the source version. tauri-action
+      # builds whatever version is in tauri.conf.json, so a tag like v0.2.13
+      # cut from a tree still on 0.2.12 produces a 0.2.12 manifest — clients
+      # already on 0.2.12 then never see an update. Fail fast instead.
+      - name: Verify tag matches source version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          SRC=$(python3 -c "import json; print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])")
+          if [ "$TAG" != "$SRC" ]; then
+            echo "::error::Tag v$TAG does not match tauri.conf.json version $SRC. Bump the source version before tagging."
+            exit 1
+          fi
+
       - name: Find or create release
         id: create
         uses: actions/github-script@v7
