@@ -8,6 +8,7 @@ import UpdateBanner from "./UpdateBanner";
 import ActivationTour, { shouldShowActivationTour } from "./ActivationTour";
 import { startUpdater } from "./updater";
 import { bucket, safeInvoke, track } from "./analytics";
+import { decideAffirmation, decideCorrective, readStats } from "./nudges";
 import { detect } from "./detectors";
 import "./index.css";
 
@@ -373,6 +374,20 @@ export default function App() {
         const filtered = prev.filter(i => i.id !== event.payload.id);
         return [event.payload, ...filtered].slice(0, 100);
       });
+
+      // Adaptive affirmation: ask the nudge engine if we should
+      // sparkle this one. Decay tiers tighten the cadence as the
+      // user racks up captures; eventually nothing fires at all.
+      const decision = decideAffirmation();
+      if (decision.show) {
+        invoke("show_nudge", { kind: decision.kind, text: decision.text }).catch(() => {});
+        track("nudge_shown", {
+          kind: decision.kind,
+          selects_total_bucket: bucket(readStats().selects)
+        });
+      } else {
+        track("nudge_suppressed", { kind: "affirmation", reason: decision.reason });
+      }
     });
     return () => { unlisten.then(fn => fn()); };
   }, []);
@@ -390,10 +405,23 @@ export default function App() {
 
   // The Rust manual-copy processor emits `manual-copy` when the user pressed
   // Cmd+C/Ctrl+C themselves within 5s of a Pluks capture. The payload is
-  // already bucketed Rust-side; we forward as a PostHog event.
+  // already bucketed Rust-side; we forward as a PostHog event AND ask the
+  // nudge engine whether to surface a corrective ("already copied — no
+  // Cmd+C needed"). Corrective only fires for users who have demonstrated
+  // partial adoption, so we don't pester non-adopters or full converts.
   useEffect(() => {
     const unlisten = listen<string>("manual-copy", event => {
       track("manual_copy_pressed", { since_last_capture_ms_bucket: event.payload });
+      const decision = decideCorrective();
+      if (decision.show) {
+        invoke("show_nudge", { kind: decision.kind, text: decision.text }).catch(() => {});
+        track("nudge_shown", {
+          kind: decision.kind,
+          selects_total_bucket: bucket(readStats().selects)
+        });
+      } else {
+        track("nudge_suppressed", { kind: "corrective", reason: decision.reason });
+      }
     });
     return () => { unlisten.then(fn => fn()); };
   }, []);

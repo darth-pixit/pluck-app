@@ -25,6 +25,22 @@
         "skipTaskbar": true,
         "visibleOnAllWorkspaces": true,
         "focus": true
+      },
+      {
+        "label": "nudge",
+        "title": "Pluks",
+        "url": "index.html#nudge",
+        "width": 220,
+        "height": 44,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
+        "focus": false,
+        "shadow": false
       }
     ],
     "security": {

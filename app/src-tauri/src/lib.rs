@@ -4,9 +4,9 @@ mod settings;
 
 use history::{Database, HistoryItem};
 use selection::{
-    activate_pid, ax_is_trusted, focus_is_editable, frontmost_pid, input_monitoring_granted,
-    read_clipboard, simulate_copy, simulate_paste, start_listener, write_clipboard, Clipboard,
-    ManualCopySignal, SelectionSignal,
+    activate_pid, ax_is_trusted, cursor_pos, focus_is_editable, frontmost_pid,
+    input_monitoring_granted, read_clipboard, simulate_copy, simulate_paste, start_listener,
+    write_clipboard, Clipboard, ManualCopySignal, SelectionSignal,
 };
 
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
@@ -21,8 +21,18 @@ use tauri::{
 };
 
 const WIN_HISTORY: &str = "history";
+const WIN_NUDGE: &str = "nudge";
 const EVT_NEW_SELECTION: &str = "new-selection";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
+const EVT_NUDGE_SHOW: &str = "nudge-show";
+
+// How far down + right of the cursor the nudge floats. Big enough that
+// the user's hand doesn't obscure it; small enough that it reads as
+// "this is about what you just did."
+const NUDGE_OFFSET_X: f64 = 18.0;
+const NUDGE_OFFSET_Y: f64 = 18.0;
+const NUDGE_WIDTH: f64 = 220.0;
+const NUDGE_HEIGHT: f64 = 44.0;
 // Emitted when the copy processor declines to capture because the user's
 // focus is in an editable text field (drag-to-replace gesture). The
 // frontend forwards this to PostHog as `selection_capture_failed` so we can
@@ -136,6 +146,45 @@ fn clear_history(state: State<Arc<AppState>>) -> bool {
 #[tauri::command]
 fn check_accessibility() -> bool {
     ax_is_trusted()
+}
+
+/// Position the dedicated nudge window near the cursor and surface a
+/// `nudge-show` event to its webview so the React component renders
+/// the appropriate copy. The window auto-hides on its own after the
+/// fade — we just need to show it once and let the webview drive the
+/// timeline. Idempotent: re-fires while already visible just retarget
+/// position + payload, so back-to-back nudges don't queue.
+#[tauri::command]
+fn show_nudge(app: AppHandle, kind: String, text: String) {
+    let Some(win) = app.get_webview_window(WIN_NUDGE) else {
+        return;
+    };
+    let (cx, cy) = cursor_pos();
+    let _ = win.set_position(tauri::LogicalPosition::new(
+        cx + NUDGE_OFFSET_X,
+        cy + NUDGE_OFFSET_Y,
+    ));
+    let _ = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT));
+    let _ = win.show();
+    // Raise above other panels — alwaysOnTop in tauri.conf isn't always
+    // enough on macOS when the window was hidden first.
+    let _ = win.set_always_on_top(true);
+    // Tell the webview which copy to render. Done after show() because
+    // the listener is already mounted from the prior session — webview
+    // doesn't reload between nudges.
+    let _ = win.emit(
+        EVT_NUDGE_SHOW,
+        serde_json::json!({ "kind": kind, "text": text }),
+    );
+    // Auto-hide after the fade window so the OS reclaims compositor
+    // resources rather than us leaving a transparent window resident.
+    let app_for_hide = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1100));
+        if let Some(w) = app_for_hide.get_webview_window(WIN_NUDGE) {
+            let _ = w.hide();
+        }
+    });
 }
 
 #[tauri::command]
@@ -509,6 +558,16 @@ pub fn run() {
                 configure_overlay_window(&win);
             }
 
+            // Configure the nudge window: same overlay treatment so it
+            // floats over every Space + full-screen, plus click-through
+            // so the user can never accidentally interact with it. We
+            // explicitly do NOT call makeKey on it — nudges must never
+            // steal focus from whatever the user is typing in.
+            if let Some(win) = app.get_webview_window(WIN_NUDGE) {
+                configure_overlay_window(&win);
+                let _ = win.set_ignore_cursor_events(true);
+            }
+
             let db_path = app.path().app_data_dir().expect("no app data dir").join("pluck.db");
             let db = Database::new(db_path).expect("failed to open database");
             let state = Arc::new(AppState {
@@ -651,12 +710,14 @@ pub fn run() {
             open_accessibility_settings,
             open_input_monitoring_settings,
             invoke_paste,
+            show_nudge,
             settings::get_settings,
             settings::set_settings,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == WIN_HISTORY {
+                let label = window.label();
+                if label == WIN_HISTORY || label == WIN_NUDGE {
                     api.prevent_close();
                     let _ = window.hide();
                 }
