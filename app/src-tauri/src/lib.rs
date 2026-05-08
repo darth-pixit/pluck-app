@@ -6,7 +6,7 @@ use history::{Database, HistoryItem};
 use selection::{
     activate_pid, ax_is_trusted, focus_is_editable, frontmost_pid, input_monitoring_granted,
     read_clipboard, simulate_copy, simulate_paste, start_listener, write_clipboard, Clipboard,
-    SelectionSignal,
+    ManualCopySignal, SelectionSignal,
 };
 
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
@@ -28,6 +28,18 @@ const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
 // frontend forwards this to PostHog as `selection_capture_failed` so we can
 // see the new path firing in the wild without needing local debug builds.
 const EVT_CAPTURE_SUPPRESSED: &str = "capture-suppressed";
+// Emitted when the user pressed Cmd+C / Ctrl+C themselves within 5s of a
+// successful Pluks capture — signal of "user doesn't trust the magic yet".
+// Drives both the analytics funnel and (later) adaptive nudging.
+const EVT_MANUAL_COPY: &str = "manual-copy";
+
+// How recent a Pluks capture must be for a user-driven Cmd+C to count as
+// a "redundant manual copy" worth tracking. Bumping this widens the
+// definition; shrinking it reduces noise.
+const MANUAL_COPY_WINDOW_MS: u128 = 5_000;
+// Synthetic Cmd+C from our own simulate_copy() typically arrives within
+// ~150 ms of `last_synthetic_copy_at`. 250 ms is conservative.
+const SYNTHETIC_COPY_GUARD_MS: u128 = 250;
 
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
@@ -44,6 +56,13 @@ pub struct AppState {
     /// We reactivate this app right before pasting so Cmd+V lands in the
     /// user's intended target rather than wherever focus happens to be.
     pub target_pid: Arc<Mutex<Option<i32>>>,
+    /// When the last successful Pluks capture landed. Read by the manual-copy
+    /// processor to decide whether a user Cmd+C is a "redundant" press.
+    pub last_capture_at: Arc<Mutex<Option<Instant>>>,
+    /// When the copy processor last fired its own simulate_copy(). The
+    /// CGEventTap also sees that synthetic Cmd+C; without this guard it
+    /// would be miscounted as a manual copy.
+    pub last_synthetic_copy_at: Arc<Mutex<Option<Instant>>>,
 }
 
 impl AppState {
@@ -61,6 +80,25 @@ impl AppState {
     }
     fn take_target_pid(&self) -> Option<i32> {
         self.target_pid.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+    fn mark_capture(&self) {
+        *self.last_capture_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+    }
+    fn mark_synthetic_copy(&self) {
+        *self.last_synthetic_copy_at.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(Instant::now());
+    }
+    fn last_capture_age_ms(&self) -> Option<u128> {
+        self.last_capture_at
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .map(|t| t.elapsed().as_millis())
+    }
+    fn last_synthetic_copy_age_ms(&self) -> Option<u128> {
+        self.last_synthetic_copy_at
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .map(|t| t.elapsed().as_millis())
     }
 }
 
@@ -355,6 +393,9 @@ fn start_copy_processor(
                 continue;
             }
 
+            // Stamp BEFORE firing so the manual-copy listener can ignore the
+            // synthetic Cmd+C this is about to generate.
+            state.mark_synthetic_copy();
             simulate_copy();
 
             // Adaptive wait: poll until clipboard changes or 600 ms elapses.
@@ -372,10 +413,56 @@ fn start_copy_processor(
                 if before.as_deref() != Some(&text) {
                     let item = state.db().insert(&text);
                     if let Ok(item) = item {
+                        state.mark_capture();
                         let _ = app_handle.emit(EVT_NEW_SELECTION, &item);
                     }
                 }
             }
+        }
+    });
+}
+
+/// Tracks user-driven Cmd+C presses that follow a Pluks capture — the signal
+/// of "user doesn't yet trust the auto-copy and double-confirms manually."
+/// Emits `manual-copy` to the frontend with the time-since-last-capture
+/// bucket; the frontend forwards as a PostHog event.
+///
+/// Filters: drops anything within `SYNTHETIC_COPY_GUARD_MS` of our own
+/// simulate_copy() (those are our synthetic Cmd+Cs), drops anything with no
+/// recent capture (that's just the user copying normally, not redundantly),
+/// drops anything while the panel is visible (Cmd+C inside Pluks is a
+/// different intent).
+fn start_manual_copy_processor(
+    rx: mpsc::Receiver<ManualCopySignal>,
+    state: Arc<AppState>,
+    app_handle: AppHandle,
+) {
+    thread::spawn(move || {
+        for ManualCopySignal in rx {
+            if panel_visible(&app_handle) {
+                continue;
+            }
+            if let Some(age) = state.last_synthetic_copy_age_ms() {
+                if age < SYNTHETIC_COPY_GUARD_MS {
+                    continue;
+                }
+            }
+            let Some(since_capture_ms) = state.last_capture_age_ms() else {
+                continue;
+            };
+            if since_capture_ms > MANUAL_COPY_WINDOW_MS {
+                continue;
+            }
+            // Bucket on the Rust side so the frontend doesn't have to know
+            // the buckets — schema allow-list takes only `since_last_capture_ms_bucket`.
+            let bucket = if since_capture_ms < 1_000 {
+                "0-1000"
+            } else if since_capture_ms < 3_000 {
+                "1000-3000"
+            } else {
+                "3000-5000"
+            };
+            let _ = app_handle.emit(EVT_MANUAL_COPY, bucket);
         }
     });
 }
@@ -428,6 +515,8 @@ pub fn run() {
                 db: Arc::new(Mutex::new(db)),
                 watcher_enabled: Arc::new(Mutex::new(true)),
                 target_pid: Arc::new(Mutex::new(None)),
+                last_capture_at: Arc::new(Mutex::new(None)),
+                last_synthetic_copy_at: Arc::new(Mutex::new(None)),
             });
             app.manage(state.clone());
 
@@ -541,8 +630,13 @@ pub fn run() {
             // listener will drop signals while the processor is mid-cycle rather than
             // queue 18 s of stale work.
             let (tx, rx) = mpsc::sync_channel::<SelectionSignal>(1);
-            start_listener(tx);
-            start_copy_processor(rx, state, app.handle().clone());
+            // Manual-copy channel is bounded slightly higher: a user mashing
+            // Cmd+C four times shouldn't lose the analytics signal, but we
+            // still want backpressure if something stalls.
+            let (tx_manual, rx_manual) = mpsc::sync_channel::<ManualCopySignal>(4);
+            start_listener(tx, tx_manual);
+            start_copy_processor(rx, state.clone(), app.handle().clone());
+            start_manual_copy_processor(rx_manual, state, app.handle().clone());
 
             Ok(())
         })

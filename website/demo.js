@@ -68,6 +68,34 @@
     }
   });
 
+  // Google Apps Script web-app URL that ingests download-form submissions
+  // into the leads spreadsheet. See scripts/leads-apps-script.gs for the
+  // server side. Empty string disables the POST — leads are still kept in
+  // localStorage as a fallback so we never silently drop a submission.
+  const LEADS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzqtzRpJGWvZkKyjLfvd8LGX1zgYWuLbuUfzAAIX__fBSCYMfJR33FH9_a_wIMhMPwBlQ/exec";
+
+  function postLeadToSheet(payload) {
+    if (!LEADS_ENDPOINT) return;
+    try {
+      // sendBeacon with a text/plain Blob avoids the CORS preflight that
+      // Apps Script web apps don't respond to. Fire-and-forget — we don't
+      // need the response, just that the row landed.
+      const blob = new Blob([JSON.stringify(payload)], { type: "text/plain" });
+      const ok = navigator.sendBeacon && navigator.sendBeacon(LEADS_ENDPOINT, blob);
+      if (!ok) {
+        // sendBeacon refused (queue full, page unloading, etc.) — fall back
+        // to fetch with no-cors so the request still goes out opaquely.
+        fetch(LEADS_ENDPOINT, {
+          method: "POST",
+          mode: "no-cors",
+          keepalive: true,
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify(payload)
+        }).catch(function () { /* fire-and-forget */ });
+      }
+    } catch (_) { /* never block download on telemetry */ }
+  }
+
   // Download modal — collect email + persona before letting download proceed
   (function downloadGate() {
     const modal = document.getElementById("dl-modal");
@@ -148,7 +176,21 @@
       } catch (_) {}
       sessionStorage.setItem("pluks_dl_ok", "1");
 
-      // Persona is a low-cardinality category (no PII). Email is NEVER sent.
+      // Email goes to our own Apps Script → Sheet endpoint (NOT PostHog).
+      // PostHog still gets persona+platform only. Browser-side referrer host
+      // and a coarse UA are included for attribution; nothing else is sent.
+      postLeadToSheet({
+        email: email,
+        persona: persona,
+        platform: pendingPlatform || "unknown",
+        referrer_host: (function () {
+          try { return document.referrer ? new URL(document.referrer).hostname : ""; }
+          catch (_) { return ""; }
+        })(),
+        user_agent: navigator.userAgent || ""
+      });
+
+      // Persona is a low-cardinality category (no PII). Email is NEVER sent to PostHog.
       track("download_form_submitted", { platform: pendingPlatform || "unknown", persona: persona });
 
       const href = pendingHref;

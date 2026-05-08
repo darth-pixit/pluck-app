@@ -37,6 +37,13 @@ const SCHEMA: Record<string, readonly string[]> = {
   selection_capture_failed:      ["reason"],
   auto_copy_toggled:             ["enabled"],
   autostart_enabled:             [],
+  // User pressed Cmd+C / Ctrl+C themselves within 5s of a Pluks capture —
+  // i.e. they "double-confirmed" a selection that was already on the
+  // clipboard. The `since_last_capture_ms_bucket` field measures how
+  // habitual that gesture is over time and feeds the muscle-memory
+  // adaptive-nudge system. Synthetic Cmd+Cs from our own simulate_copy()
+  // are filtered out Rust-side so they never reach this event.
+  manual_copy_pressed:           ["since_last_capture_ms_bucket"],
 
   permission_check:              ["accessibility_granted", "input_monitoring_granted"],
   permission_grant_clicked:      ["permission"],
