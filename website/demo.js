@@ -72,7 +72,7 @@
   // into the leads spreadsheet. See scripts/leads-apps-script.gs for the
   // server side. Empty string disables the POST — leads are still kept in
   // localStorage as a fallback so we never silently drop a submission.
-  const LEADS_ENDPOINT = "";
+  const LEADS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzqtzRpJGWvZkKyjLfvd8LGX1zgYWuLbuUfzAAIX__fBSCYMfJR33FH9_a_wIMhMPwBlQ/exec";
 
   function postLeadToSheet(payload) {
     if (!LEADS_ENDPOINT) return;
