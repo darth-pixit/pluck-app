@@ -61,7 +61,7 @@ impl Database {
         let most_recent: Option<String> = self
             .conn
             .query_row(
-                "SELECT content FROM history ORDER BY copied_at DESC LIMIT 1",
+                "SELECT content FROM history ORDER BY copied_at DESC, id DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
@@ -69,7 +69,7 @@ impl Database {
 
         if most_recent.as_deref() == Some(content) {
             return self.conn.query_row(
-                "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC LIMIT 1",
+                "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC, id DESC LIMIT 1",
                 [],
                 map_row,
             );
@@ -86,7 +86,7 @@ impl Database {
         if self.row_count > HISTORY_LIMIT {
             let removed = self.conn.execute(
                 "DELETE FROM history WHERE id NOT IN (
-                   SELECT id FROM history ORDER BY copied_at DESC LIMIT ?1
+                   SELECT id FROM history ORDER BY copied_at DESC, id DESC LIMIT ?1
                  )",
                 params![HISTORY_LIMIT as i64],
             )?;
@@ -98,7 +98,7 @@ impl Database {
 
     pub fn get_all(&self) -> Result<Vec<HistoryItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC LIMIT ?1",
+            "SELECT id, content, copied_at FROM history ORDER BY copied_at DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![HISTORY_LIMIT as i64], map_row)?;
         let mut out = Vec::with_capacity(HISTORY_LIMIT);
