@@ -2,21 +2,64 @@ mod history;
 mod selection;
 mod settings;
 
-// Stderr-only timing probe gated behind the `diag` cargo feature. Compiles
-// to nothing in production builds. Used to investigate large-sheet copy
-// failures (WPS, Excel) without changing any timing or behavior.
+// Timing probe gated behind the `diag` cargo feature. Compiles to nothing
+// in production builds. Used to investigate large-sheet copy failures (WPS,
+// Excel) without changing any timing or behavior. Output goes to stderr AND
+// to a file so a non-Terminal reporter can run the build and just send the
+// log. Default path is $TMPDIR/pluks-diag.log; override with PLUKS_DIAG_LOG.
+#[cfg(feature = "diag")]
+pub fn diag_log_line(line: &str) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    static SINK: OnceLock<Mutex<Option<std::fs::File>>> = OnceLock::new();
+    let sink = SINK.get_or_init(|| {
+        let path = std::env::var_os("PLUKS_DIAG_LOG")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("pluks-diag.log"));
+        let mut opened = OpenOptions::new().create(true).append(true).open(&path);
+        match &mut opened {
+            Ok(f) => {
+                eprintln!("[pluks-diag] writing to {}", path.display());
+                let _ = writeln!(
+                    f,
+                    "===== pluks {} on {} pid={} ts={}us =====",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_micros())
+                        .unwrap_or(0),
+                );
+                let _ = f.flush();
+            }
+            Err(e) => eprintln!("[pluks-diag] could not open {}: {}", path.display(), e),
+        }
+        Mutex::new(opened.ok())
+    });
+    eprintln!("{}", line);
+    if let Ok(mut guard) = sink.lock() {
+        if let Some(f) = guard.as_mut() {
+            let _ = writeln!(f, "{}", line);
+            let _ = f.flush();
+        }
+    }
+}
+
 #[cfg(feature = "diag")]
 #[macro_export]
 macro_rules! diag_log {
     ($($arg:tt)*) => {{
-        eprintln!(
+        $crate::diag_log_line(&format!(
             "[pluks-diag {}us] {}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_micros())
                 .unwrap_or(0),
             format_args!($($arg)*)
-        )
+        ))
     }};
 }
 
