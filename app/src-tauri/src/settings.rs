@@ -25,13 +25,31 @@ pub struct Settings {
 }
 
 impl Settings {
-    fn fresh() -> Self {
+    pub(crate) fn fresh() -> Self {
         Self {
             anon_id: gen_uuid(),
             opt_out: false,
             crash_opt_out: false,
             analytics_first_seen_version: String::new(),
             last_seen_version: String::new(),
+        }
+    }
+}
+
+/// Load settings from a specific path, recovering with a fresh record on
+/// missing or unparseable files. Pure function — no Tauri dependency, so we
+/// can unit test it directly.
+pub(crate) fn load_from_path(path: &PathBuf) -> Settings {
+    match fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str::<Settings>(&s).unwrap_or_else(|_| {
+            let fresh = Settings::fresh();
+            let _ = save(path, &fresh);
+            fresh
+        }),
+        Err(_) => {
+            let fresh = Settings::fresh();
+            let _ = save(path, &fresh);
+            fresh
         }
     }
 }
@@ -68,21 +86,10 @@ fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 
 pub fn load_or_init<R: Runtime>(app: &AppHandle<R>) -> Settings {
     let Some(path) = settings_path(app) else { return Settings::fresh() };
-    match fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str::<Settings>(&s).unwrap_or_else(|_| {
-            let fresh = Settings::fresh();
-            let _ = save(&path, &fresh);
-            fresh
-        }),
-        Err(_) => {
-            let fresh = Settings::fresh();
-            let _ = save(&path, &fresh);
-            fresh
-        }
-    }
+    load_from_path(&path)
 }
 
-fn save(path: &PathBuf, s: &Settings) -> std::io::Result<()> {
+pub(crate) fn save(path: &PathBuf, s: &Settings) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(s).unwrap_or_else(|_| "{}".into());
     fs::write(path, json)
 }
@@ -96,4 +103,121 @@ pub fn get_settings<R: Runtime>(app: AppHandle<R>) -> Settings {
 pub fn set_settings<R: Runtime>(app: AppHandle<R>, settings: Settings) -> bool {
     let Some(path) = settings_path(&app) else { return false };
     save(&path, &settings).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn fresh_settings_has_uuid_v4_shape() {
+        let s = Settings::fresh();
+        // 8-4-4-4-12
+        let parts: Vec<&str> = s.anon_id.split('-').collect();
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[0].len(), 8);
+        assert_eq!(parts[1].len(), 4);
+        assert_eq!(parts[2].len(), 4);
+        assert_eq!(parts[3].len(), 4);
+        assert_eq!(parts[4].len(), 12);
+        // Version nibble = 4
+        let third = parts[2];
+        assert!(third.starts_with('4'));
+        // Variant = 8/9/a/b
+        let fourth = parts[3];
+        let v = fourth.chars().next().unwrap();
+        assert!(matches!(v, '8' | '9' | 'a' | 'b'));
+    }
+
+    #[test]
+    fn fresh_settings_have_safe_defaults() {
+        let s = Settings::fresh();
+        assert!(!s.opt_out);
+        assert!(!s.crash_opt_out);
+        assert!(s.analytics_first_seen_version.is_empty());
+        assert!(s.last_seen_version.is_empty());
+    }
+
+    #[test]
+    fn gen_uuid_uniqueness_over_many_calls() {
+        let n = 256;
+        let mut ids = std::collections::HashSet::new();
+        for _ in 0..n {
+            ids.insert(gen_uuid());
+        }
+        assert_eq!(ids.len(), n);
+    }
+
+    #[test]
+    fn load_from_missing_path_writes_fresh_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(!path.exists());
+        let s = load_from_path(&path);
+        assert!(path.exists(), "fresh save should land");
+        assert!(!s.anon_id.is_empty());
+    }
+
+    #[test]
+    fn load_roundtrips_through_save() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut s = Settings::fresh();
+        s.opt_out = true;
+        s.last_seen_version = "1.2.3".into();
+        save(&path, &s).unwrap();
+        let loaded = load_from_path(&path);
+        assert_eq!(loaded.anon_id, s.anon_id);
+        assert!(loaded.opt_out);
+        assert_eq!(loaded.last_seen_version, "1.2.3");
+    }
+
+    #[test]
+    fn load_recovers_from_corrupt_json_with_fresh_settings() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "this is not json").unwrap();
+        let recovered = load_from_path(&path);
+        assert!(!recovered.anon_id.is_empty());
+        // The file was rewritten with the fresh record.
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains(&recovered.anon_id));
+    }
+
+    #[test]
+    fn load_recovers_from_empty_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "").unwrap();
+        let s = load_from_path(&path);
+        assert!(!s.anon_id.is_empty());
+    }
+
+    #[test]
+    fn save_overwrites_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        let s1 = Settings::fresh();
+        save(&path, &s1).unwrap();
+        let mut s2 = Settings::fresh();
+        s2.last_seen_version = "9.9.9".into();
+        save(&path, &s2).unwrap();
+        let loaded = load_from_path(&path);
+        assert_eq!(loaded.last_seen_version, "9.9.9");
+        assert_eq!(loaded.anon_id, s2.anon_id);
+    }
+
+    #[test]
+    fn deserialize_with_missing_optional_fields_uses_serde_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        // Only the required field present — older record format.
+        fs::write(&path, r#"{"anon_id":"old-record"}"#).unwrap();
+        let s = load_from_path(&path);
+        assert_eq!(s.anon_id, "old-record");
+        assert!(!s.opt_out);
+        assert!(!s.crash_opt_out);
+        assert!(s.analytics_first_seen_version.is_empty());
+    }
 }

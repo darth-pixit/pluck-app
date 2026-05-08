@@ -41,7 +41,7 @@ impl Database {
              CREATE TABLE IF NOT EXISTS history (
                id         INTEGER PRIMARY KEY AUTOINCREMENT,
                content    TEXT NOT NULL,
-               copied_at  DATETIME DEFAULT (datetime('now'))
+               copied_at  DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
              );
              CREATE INDEX IF NOT EXISTS idx_copied_at ON history(copied_at DESC);",
         )?;
@@ -132,5 +132,155 @@ impl Database {
         self.conn.execute("DELETE FROM history", [])?;
         self.row_count = 0;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (Database, TempDir) {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("test.db");
+        let db = Database::new(path).expect("open db");
+        (db, dir)
+    }
+
+    #[test]
+    fn empty_db_returns_no_rows() {
+        let (db, _d) = fresh_db();
+        assert_eq!(db.get_all().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn insert_returns_item_with_assigned_id() {
+        let (mut db, _d) = fresh_db();
+        let item = db.insert("hello world").unwrap();
+        assert!(item.id > 0);
+        assert_eq!(item.content, "hello world");
+        assert_eq!(item.char_count, 11);
+    }
+
+    #[test]
+    fn insert_persists_and_returns_in_get_all() {
+        let (mut db, _d) = fresh_db();
+        db.insert("first").unwrap();
+        db.insert("second").unwrap();
+        let all = db.get_all().unwrap();
+        assert_eq!(all.len(), 2);
+        // Newest first by copied_at DESC
+        assert_eq!(all[0].content, "second");
+        assert_eq!(all[1].content, "first");
+    }
+
+    #[test]
+    fn duplicate_top_row_does_not_double_insert() {
+        let (mut db, _d) = fresh_db();
+        db.insert("dupe").unwrap();
+        db.insert("dupe").unwrap();
+        let all = db.get_all().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].content, "dupe");
+    }
+
+    #[test]
+    fn non_top_duplicate_inserts_a_new_row() {
+        let (mut db, _d) = fresh_db();
+        db.insert("a").unwrap();
+        db.insert("b").unwrap();
+        // Now "a" is no longer the top, re-inserting it should land as a new row.
+        db.insert("a").unwrap();
+        let all = db.get_all().unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].content, "a");
+    }
+
+    #[test]
+    fn history_is_capped_at_100() {
+        let (mut db, _d) = fresh_db();
+        for i in 0..120 {
+            db.insert(&format!("item-{:03}", i)).unwrap();
+        }
+        let all = db.get_all().unwrap();
+        assert_eq!(all.len(), HISTORY_LIMIT);
+        // Newest 100 retained — item-119 is on top.
+        assert_eq!(all[0].content, "item-119");
+        // Oldest 20 dropped.
+        assert!(all.iter().all(|i| i.content != "item-000"));
+        assert!(all.iter().all(|i| i.content != "item-019"));
+    }
+
+    #[test]
+    fn get_content_by_id_roundtrip() {
+        let (mut db, _d) = fresh_db();
+        let item = db.insert("look me up").unwrap();
+        let found = db.get_content_by_id(item.id).unwrap();
+        assert_eq!(found.as_deref(), Some("look me up"));
+    }
+
+    #[test]
+    fn get_content_by_id_returns_none_for_missing() {
+        let (db, _d) = fresh_db();
+        assert!(db.get_content_by_id(999_999).unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_removes_a_row_and_count() {
+        let (mut db, _d) = fresh_db();
+        db.insert("keep").unwrap();
+        let doomed = db.insert("doomed").unwrap();
+        db.delete(doomed.id).unwrap();
+        let all = db.get_all().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].content, "keep");
+    }
+
+    #[test]
+    fn delete_unknown_id_is_noop() {
+        let (mut db, _d) = fresh_db();
+        db.insert("a").unwrap();
+        db.delete(999_999).unwrap();
+        assert_eq!(db.get_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn clear_all_empties_history() {
+        let (mut db, _d) = fresh_db();
+        for i in 0..10 {
+            db.insert(&format!("x-{}", i)).unwrap();
+        }
+        db.clear_all().unwrap();
+        assert_eq!(db.get_all().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn char_count_counts_unicode_codepoints_not_bytes() {
+        let (mut db, _d) = fresh_db();
+        let item = db.insert("éñü").unwrap(); // 3 chars, 6 bytes
+        assert_eq!(item.char_count, 3);
+    }
+
+    #[test]
+    fn database_persists_across_reopens() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("persist.db");
+        {
+            let mut db = Database::new(path.clone()).unwrap();
+            db.insert("survives").unwrap();
+        }
+        let db2 = Database::new(path).unwrap();
+        let all = db2.get_all().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].content, "survives");
+    }
+
+    #[test]
+    fn very_long_content_roundtrips() {
+        let (mut db, _d) = fresh_db();
+        let long = "x".repeat(50_000);
+        let item = db.insert(&long).unwrap();
+        assert_eq!(item.char_count, 50_000);
+        assert_eq!(db.get_content_by_id(item.id).unwrap().unwrap().len(), 50_000);
     }
 }

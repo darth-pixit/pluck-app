@@ -5,6 +5,13 @@ app/src-tauri/gen/
 # Node
 app/node_modules/
 app/dist/
+extension/node_modules/
+website/node_modules/
+
+# Test artifacts
+**/test-results/
+**/playwright-report/
+app/coverage/
 
 # OS
 .DS_Store

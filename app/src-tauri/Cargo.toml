@@ -31,3 +31,6 @@ enigo = "0.2"
 # Global input listener for selection detection on Windows & Linux.
 # (macOS uses a native CGEventTap — see selection::mac_tap.)
 rdev = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
