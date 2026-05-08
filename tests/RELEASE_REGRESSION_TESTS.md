@@ -5,6 +5,31 @@ feature across the three Pluks surfaces (desktop app, browser extension,
 website). Run the entire suite before every release. A test failure on any
 case marked **MUST PASS** is a release blocker.
 
+## Automation status
+
+A large fraction of the cases below run automatically on every push and PR via
+`.github/workflows/tests.yml`. The four automated suites:
+
+| Suite | Runner | Coverage |
+| ----- | ------ | -------- |
+| `app/` vitest + RTL | `cd app && npm test` | A2 (capture logic via mocks), A3-A6 panel + history + smart-paste, A7 nudge engine, A8 prefs, A9 updater notice, A12 activation flag, A13 analytics whitelist/scrub |
+| `app/src-tauri` cargo test | `cd app/src-tauri && cargo test --lib` | A12 SQLite history (insert, dedup, cap, delete, clear, persist), settings (load/save/corrupt recovery, UUID shape) |
+| `extension/` Playwright | `cd extension && npx playwright test` | B2 content-script auto-copy + toast, B3 storage dedup + cap, B4 popup search + click + clear + opt-out |
+| `website/` Playwright | `cd website && npx playwright test` | C1 render + privacy, C2 demo toast, C3 download modal validation + lead persistence + close paths |
+
+What is **NOT** automated and stays manual:
+
+- A1 OS permission grants (TCC requires real macOS user session)
+- A2 actual auto-copy via real Cmd+C synthesis into other apps
+- A3.1 / A4 real Cmd+Shift+V global shortcut + paste-into-previous-app
+- A10 tray menu (no API to drive macOS NSStatusBar from automation)
+- A11 traffic-light close/minimize / drag-by-titlebar
+- A14 install / upgrade path
+- All hardware budgets in section E
+
+Cases marked with **🤖** below have automated coverage. The list of automated
+test files is the source of truth — this annotation is a navigation aid.
+
 ---
 
 ## How to use this document
