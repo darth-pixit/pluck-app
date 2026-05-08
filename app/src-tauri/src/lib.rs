@@ -427,29 +427,26 @@ fn start_copy_processor(
                 continue;
             }
 
-            // If the user is selecting inside an editable text field, treat
-            // it as a "replace" gesture — don't auto-copy. Otherwise we'd
-            // overwrite their clipboard with the destination text and pollute
-            // history. The detector returns false when AX can't classify the
-            // focus, so unsupported apps fall back to the prior behavior.
-            if focus_is_editable() {
-                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
-                continue;
-            }
-
+            // Snapshot the clipboard BEFORE touching anything. We need this for
+            // two reasons: (1) deduping the captured text against the user's
+            // current clipboard, and (2) restoring it untouched when the
+            // capture lands inside an editable field (drag-to-replace gesture).
             let before = read_clipboard(&mut clip);
+
+            // Detect editable focus before the settle-sleep so a fast typer
+            // who starts replacing within 80ms still gets their selection
+            // recorded. We re-check after the sleep too — if AX flips state
+            // between the two reads we treat the gesture as editable, which
+            // is the safer default for clipboard-restore.
+            let editable_pre = focus_is_editable();
             thread::sleep(Duration::from_millis(80));
 
-            // Re-check just before firing Cmd+C: the panel may have appeared, the
-            // user may have toggled auto-copy off, or focus may have moved into
-            // an editable target during the sleep.
+            // Re-check just before firing Cmd+C: the panel may have appeared
+            // or the user may have toggled auto-copy off during the sleep.
             if !state.watcher_enabled() || panel_visible(&app_handle) {
                 continue;
             }
-            if focus_is_editable() {
-                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
-                continue;
-            }
+            let editable = editable_pre || focus_is_editable();
 
             // Stamp BEFORE firing so the manual-copy listener can ignore the
             // synthetic Cmd+C this is about to generate.
@@ -474,7 +471,26 @@ fn start_copy_processor(
                         state.mark_capture();
                         let _ = app_handle.emit(EVT_NEW_SELECTION, &item);
                     }
+                    // Editable focus = drag-to-replace. The selection is now
+                    // safely at the top of history (recoverable / re-pastable
+                    // at the next position), so put the user's prior clipboard
+                    // back. This preserves their existing Cmd+V target and
+                    // keeps the overwritten text out of the system clipboard
+                    // — they'll type-replace cleanly without our Cmd+C
+                    // side-effect leaking into a later paste.
+                    if editable {
+                        let _ = match before.as_deref() {
+                            Some(prev) => write_clipboard(prev),
+                            None => write_clipboard(""),
+                        };
+                        let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus_restored");
+                    }
                 }
+            } else if editable {
+                // Cmd+C produced nothing (selection vanished mid-replace, or AX
+                // disagrees with reality). Nothing to restore, but keep the
+                // telemetry so we can see the editable path firing in the wild.
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus_empty");
             }
         }
     });
