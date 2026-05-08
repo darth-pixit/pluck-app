@@ -58,22 +58,21 @@
 <section class="stats">
   <div class="stats-inner">
     <div class="stat">
-      <div class="stat-num">12,400+</div>
+      <div class="stat-num" id="stat-downloads" data-base="12400">12,400</div>
       <div class="stat-label">downloads</div>
     </div>
     <div class="stat">
-      <div class="stat-num">3,812 hrs</div>
+      <div class="stat-num" id="stat-hours" data-base="3812">3,812 hrs</div>
       <div class="stat-label">saved (and counting)</div>
     </div>
     <div class="stat">
-      <div class="stat-num">∞</div>
-      <div class="stat-label">tired pinkies rescued</div>
+      <div class="stat-num">0</div>
+      <div class="stat-label">keystrokes required</div>
     </div>
   </div>
   <p class="stats-quip">
-    That's <strong>3,812 hours</strong> our users didn't spend mashing <kbd>⌘</kbd>+<kbd>C</kbd>.
-    Your fingers called. They want a vacation. <br>
-    Pluks is basically a spa day for your left pinky. 💅
+    That's <strong id="stat-hours-inline">3,812 hours</strong> our users didn't spend mashing <kbd>⌘</kbd>+<kbd>C</kbd> (or <kbd>Ctrl</kbd>+<kbd>C</kbd>).
+    Your fingers called — they're filing for early retirement. ✨
   </p>
 </section>
 
@@ -297,6 +296,7 @@
 </footer>
 
 <script src="demo.js"></script>
+<script src="stats.js"></script>
 <script src="analytics.js"></script>
 <script>
 // Auto-resolve download links from the latest GitHub release so the website
