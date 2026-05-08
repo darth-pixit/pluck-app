@@ -54,6 +54,12 @@ const SCHEMA: Record<string, readonly string[]> = {
   onboarding_step_advanced:      ["step"],
   onboarding_completed:          ["dismiss_reason"],
 
+  // Post-permission interactive activation tour (select → paste → repeat → ⌘⇧V).
+  // Distinct from onboarding_* so the funnel stages don't blur together.
+  activation_started:            [],
+  activation_step_advanced:      ["step"],
+  activation_completed:          ["dismiss_reason", "steps_done"],
+
   history_loaded:                ["item_count", "load_ms"],
   history_item_clicked:          ["position", "kind", "char_count_bucket"],
   history_item_pasted_keyboard:  ["position", "kind"],

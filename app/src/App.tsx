@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import HistoryPanel from "./HistoryPanel";
 import PreferencesScreen from "./PreferencesScreen";
 import UpdateBanner from "./UpdateBanner";
+import ActivationTour, { shouldShowActivationTour } from "./ActivationTour";
 import { startUpdater } from "./updater";
 import { bucket, safeInvoke, track } from "./analytics";
 import { detect } from "./detectors";
@@ -156,16 +157,16 @@ interface TourStep {
 
 const TOUR_STEPS: TourStep[] = [
   {
-    title: "Select any text",
-    body: "Pluks watches your selections in the background and auto-copies them. No keyboard shortcut needed — just highlight.",
+    title: "Select to copy",
+    body: "Highlight any text — anywhere on your Mac. No Cmd+C, no right-click. Pluks grabs it the moment you let go.",
   },
   {
-    title: `Open Pluks anywhere with ${SHORTCUT_HINT}`,
-    body: "Hit the shortcut from any app to bring up your last 100 clips. Hold the modifier and release to instantly paste the highlighted item.",
+    title: `Your last 100 clips, ${SHORTCUT_HINT} away`,
+    body: "Hit the shortcut from any app to open your clipboard history. Search, click, paste — anything you copied recently is one tap away.",
   },
   {
-    title: "Smart paste",
-    body: "JSON gets prettified, URLs become Markdown links, hex turns into rgb(). Look for the action row under recognized items.",
+    title: "Privacy first — local only",
+    body: "What you copy stays on this Mac. Pluks doesn't read it, doesn't sync it, doesn't send it anywhere. Open source, on-device, full stop.",
   },
 ];
 
@@ -225,6 +226,10 @@ export default function App() {
     if (!seen) track("onboarding_started", {});
     return !seen;
   });
+  // Activation tour shows once after permissions land, before the user
+  // hits the empty main panel. Initialised lazily, but the show/hide
+  // transition is driven by an effect that watches needsSetup → false.
+  const [showActivation, setShowActivation]         = useState(false);
   const keyboardModeTime                            = useRef(0);
   const lastShownAt                                 = useRef(0);
   const activeItemIdRef                             = useRef<number | null>(null);
@@ -304,6 +309,19 @@ export default function App() {
     setShowTour(false);
   }, []);
 
+  // Surface the activation tour exactly once: only after the welcome tour
+  // is past, permissions have landed, and the user hasn't seen activation
+  // before. The flag check runs in an effect (not initial state) because
+  // permission grants can resolve asynchronously after first render.
+  useEffect(() => {
+    if (showTour || needsSetup || showActivation) return;
+    if (shouldShowActivationTour()) setShowActivation(true);
+  }, [showTour, needsSetup, showActivation]);
+
+  const dismissActivation = useCallback(() => {
+    setShowActivation(false);
+  }, []);
+
   // On focus: re-check permissions + refocus the search field, and stamp
   // the open time so the immediately-following blur (from focus flicker
   // during show → orderFront → makeKey) doesn't insta-hide the panel.
@@ -317,7 +335,10 @@ export default function App() {
         lastShownAt.current = Date.now();
         checkPermissions();
         searchRef.current?.focus();
-      } else if (!needsSetup) {
+      } else if (!needsSetup && !showActivation) {
+        // Activation tour expects focus to move to other apps (step 2's
+        // "paste anywhere", step 4's ⌘⇧V from another app) — don't auto-
+        // hide the panel during it.
         if (Date.now() - lastShownAt.current < BLUR_HIDE_GRACE_MS) return;
         track("panel_closed", {
           dismiss_reason: "blur",
@@ -328,7 +349,7 @@ export default function App() {
       }
     }).then(fn => { if (!active) fn(); else cleanup = fn; });
     return () => { active = false; cleanup?.(); };
-  }, [checkPermissions, needsSetup]);
+  }, [checkPermissions, needsSetup, showActivation]);
 
   // Cmd+Shift+Up / Cmd+Shift+Down arrive as Tauri events because macOS
   // swallows arrow keydowns at the OS level when Cmd is held. Replay them
@@ -516,6 +537,15 @@ export default function App() {
           )}
         </Titlebar>
         <SetupScreen hasAccessibility={hasAccessibility} hasInputMonitoring={hasInputMonitoring} onCheck={checkPermissions} />
+      </div>
+    );
+  }
+
+  if (showActivation) {
+    return (
+      <div className="panel panel-setup">
+        <Titlebar />
+        <ActivationTour onDone={dismissActivation} />
       </div>
     );
   }

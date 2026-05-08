@@ -553,6 +553,104 @@ body:not(.platform-mac) .traffic-lights { display: none; }
   transition: background .12s, border-color .12s;
 }
 .tour-next:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.tour-next:disabled,
+.tour-next[aria-disabled="true"] {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.35);
+  cursor: not-allowed;
+}
+
+/* ── Activation tour: per-step interactive surfaces ───────────────── */
+
+.activation-card { gap: 12px; }
+
+.activation-sample {
+  margin: 0;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  user-select: text;
+  cursor: text;
+  transition: border-color .2s, background .2s;
+}
+.activation-sample.done {
+  border-style: solid;
+  border-color: rgba(252,76,2,0.55);
+  background: rgba(252,76,2,0.08);
+}
+
+.activation-paste {
+  width: 100%;
+  min-height: 70px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  transition: border-color .2s, background .2s;
+}
+.activation-paste:focus { border-color: rgba(255,255,255,0.28); }
+.activation-paste.done {
+  border-style: solid;
+  border-color: rgba(252,76,2,0.55);
+  background: rgba(252,76,2,0.08);
+}
+
+.activation-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 8px;
+  transition: border-color .2s, background .2s;
+}
+.activation-shortcut.done {
+  border-style: solid;
+  border-color: rgba(252,76,2,0.55);
+  background: rgba(252,76,2,0.08);
+}
+.activation-shortcut kbd {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 6px 12px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+.activation-shortcut-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.activation-status {
+  min-height: 16px;
+  font-size: 12px;
+  color: var(--accent);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .2s, transform .2s;
+}
+.activation-status.show {
+  opacity: 1;
+  transform: translateY(0);
+}
 
 /* ── Setup screen privacy note ─────────────────────────────────────── */
 .setup-privacy-note {
