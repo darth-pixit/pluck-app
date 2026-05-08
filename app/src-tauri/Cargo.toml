@@ -1,6 +1,6 @@
 [package]
 name = "pluck"
-version = "0.2.13"
+version = "0.2.14"
 description = "Select text — it's already copied."
 authors = ["Pluck"]
 edition = "2021"
