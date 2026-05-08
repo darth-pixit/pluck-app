@@ -367,6 +367,16 @@ export default function App() {
     return () => { unlisten.then(fn => fn()); };
   }, []);
 
+  // The Rust manual-copy processor emits `manual-copy` when the user pressed
+  // Cmd+C/Ctrl+C themselves within 5s of a Pluks capture. The payload is
+  // already bucketed Rust-side; we forward as a PostHog event.
+  useEffect(() => {
+    const unlisten = listen<string>("manual-copy", event => {
+      track("manual_copy_pressed", { since_last_capture_ms_bucket: event.payload });
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
   // Rust emits "keyboard-open" when CMD+Shift+V opens the panel.
   useEffect(() => {
     const unlisten = listen("keyboard-open", () => {

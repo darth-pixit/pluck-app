@@ -4,6 +4,13 @@ use std::time::{Duration, Instant};
 
 pub struct SelectionSignal;
 
+/// User pressed the platform copy shortcut explicitly (Cmd+C / Ctrl+C).
+/// Used by `manual_copy_processor` in lib.rs to track the user's habit
+/// of double-confirming with Cmd+C even after Pluks has already grabbed
+/// the selection. Also catches our own `simulate_copy()` synthetic
+/// Cmd+C — lib.rs filters those via a synthetic-copy timestamp.
+pub struct ManualCopySignal;
+
 const DRAG_PIXEL_THRESHOLD: f64 = 4.0;
 const MULTI_CLICK_MIN_GAP_MS: u128 = 30;
 const MULTI_CLICK_MAX_GAP_MS: u128 = 600;
@@ -479,6 +486,7 @@ mod mac_tap {
 
     struct Ctx {
         tx: mpsc::SyncSender<SelectionSignal>,
+        tx_manual: mpsc::SyncSender<ManualCopySignal>,
         press_x: f64,
         press_y: f64,
         button_down: bool,
@@ -533,11 +541,18 @@ mod mac_tap {
                 }
             }
             K_CG_EVENT_KEY_DOWN => {
-                // Only Cmd+A (no other modifiers) counts as "select all".
                 let kc = CGEventGetIntegerValueField(ev, K_CG_KEYBOARD_EVENT_KEYCODE);
                 let flags = CGEventGetFlags(ev) & (FLAG_CMD | FLAG_SHIFT | FLAG_CTRL | FLAG_OPT);
+                // Cmd+A (no other modifiers) counts as "select all" → trigger capture.
                 if kc == KEYCODE_A && flags == FLAG_CMD {
                     let _ = ctx.tx.try_send(SelectionSignal);
+                }
+                // Cmd+C (no other modifiers) is a manual copy gesture. lib.rs
+                // distinguishes user-driven Cmd+C from our own simulate_copy()
+                // synthetic events via a timestamp gate — this listener can't
+                // tell them apart from the OS event stream alone.
+                if kc as u16 == KEYCODE_C && flags == FLAG_CMD {
+                    let _ = ctx.tx_manual.try_send(ManualCopySignal);
                 }
             }
             _ => {}
@@ -545,13 +560,17 @@ mod mac_tap {
         ev
     }
 
-    pub fn run(tx: mpsc::SyncSender<SelectionSignal>) {
+    pub fn run(
+        tx: mpsc::SyncSender<SelectionSignal>,
+        tx_manual: mpsc::SyncSender<ManualCopySignal>,
+    ) {
         let mask: u64 = (1u64 << K_CG_EVENT_LEFT_MOUSE_DOWN)
             | (1u64 << K_CG_EVENT_LEFT_MOUSE_UP)
             | (1u64 << K_CG_EVENT_KEY_DOWN);
 
         let ctx = Box::into_raw(Box::new(Ctx {
             tx,
+            tx_manual,
             press_x: 0.0,
             press_y: 0.0,
             button_down: false,
@@ -602,7 +621,10 @@ mod rdev_listener {
     use super::*;
     use rdev::{listen, Button, Event, EventType, Key};
 
-    pub fn run(tx: mpsc::SyncSender<SelectionSignal>) {
+    pub fn run(
+        tx: mpsc::SyncSender<SelectionSignal>,
+        tx_manual: mpsc::SyncSender<ManualCopySignal>,
+    ) {
         let mut press_x = 0.0_f64;
         let mut press_y = 0.0_f64;
         let mut cur_x = 0.0_f64;
@@ -652,6 +674,11 @@ mod rdev_listener {
                         let _ = tx.try_send(SelectionSignal);
                     }
                 }
+                Key::KeyC => {
+                    if ctrl && !shift && !alt && !meta {
+                        let _ = tx_manual.try_send(ManualCopySignal);
+                    }
+                }
                 _ => {}
             },
             EventType::KeyRelease(k) => match k {
@@ -670,7 +697,10 @@ mod rdev_listener {
     }
 }
 
-pub fn start_listener(tx: mpsc::SyncSender<SelectionSignal>) {
+pub fn start_listener(
+    tx: mpsc::SyncSender<SelectionSignal>,
+    tx_manual: mpsc::SyncSender<ManualCopySignal>,
+) {
     thread::spawn(move || {
         loop {
             if ax_is_trusted() && input_monitoring_granted() { break; }
@@ -680,10 +710,10 @@ pub fn start_listener(tx: mpsc::SyncSender<SelectionSignal>) {
         dlog!("[pluks] Permissions confirmed — starting listener.");
 
         #[cfg(target_os = "macos")]
-        mac_tap::run(tx);
+        mac_tap::run(tx, tx_manual);
 
         #[cfg(not(target_os = "macos"))]
-        rdev_listener::run(tx);
+        rdev_listener::run(tx, tx_manual);
     });
 }
 
