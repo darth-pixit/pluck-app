@@ -43,7 +43,7 @@ const CORRECTIVE_COOLDOWN_MS = 60_000;
 export type NudgeKind = "affirmation" | "corrective";
 
 export type NudgeDecision =
-  | { show: true; kind: NudgeKind; text: string }
+  | { show: true; kind: NudgeKind; text: string; selects: number }
   | { show: false; reason: string };
 
 function read(key: string): number {
@@ -81,23 +81,19 @@ export function readStats(): NudgeStats {
 
 /** Called on every successful Pluks capture (one per `new-selection` event). */
 export function decideAffirmation(): NudgeDecision {
-  const before = read(KEY_SELECTS);
   // Increment first — the decision uses the post-increment count so the
   // 5-tier "first 5" is genuinely the first 5 captures, not 0–4.
-  const selects = before + 1;
+  const selects = read(KEY_SELECTS) + 1;
   write(KEY_SELECTS, selects);
 
   const tier = AFFIRMATION_TIERS.find(t => selects <= t.until);
-  if (!tier) {
-    return { show: false, reason: "past_decay_horizon" };
-  }
+  if (!tier) return { show: false, reason: "past_decay_horizon" };
   // every-Nth gating uses (selects - 1) so the first capture in a tier
   // always fires (modulo == 0 for selects=1, 6, 21, etc).
-  if (((selects - 1) % tier.everyN) !== 0) {
-    return { show: false, reason: "decay_skip" };
-  }
+  if (((selects - 1) % tier.everyN) !== 0) return { show: false, reason: "decay_skip" };
+
   write(KEY_AFFIRMATIONS, read(KEY_AFFIRMATIONS) + 1);
-  return { show: true, kind: "affirmation", text: "✦ Snagged" };
+  return { show: true, kind: "affirmation", text: "✦ Snagged", selects };
 }
 
 /**
@@ -110,21 +106,14 @@ export function decideCorrective(): NudgeDecision {
   write(KEY_REDUNDANT, read(KEY_REDUNDANT) + 1);
 
   const stats = readStats();
-  if (stats.selects < CORRECTIVE_MIN_SELECTS) {
-    return { show: false, reason: "below_baseline" };
-  }
-  if (stats.redundancyRatio < CORRECTIVE_MIN_REDUNDANCY_RATIO) {
-    return { show: false, reason: "already_adopted" };
-  }
-  if (stats.redundancyRatio > CORRECTIVE_MAX_REDUNDANCY_RATIO) {
-    return { show: false, reason: "non_adopter" };
-  }
+  if (stats.selects < CORRECTIVE_MIN_SELECTS) return { show: false, reason: "below_baseline" };
+  if (stats.redundancyRatio < CORRECTIVE_MIN_REDUNDANCY_RATIO) return { show: false, reason: "already_adopted" };
+  if (stats.redundancyRatio > CORRECTIVE_MAX_REDUNDANCY_RATIO) return { show: false, reason: "non_adopter" };
   const sinceLast = Date.now() - stats.lastCorrectiveAt;
-  if (stats.lastCorrectiveAt > 0 && sinceLast < CORRECTIVE_COOLDOWN_MS) {
-    return { show: false, reason: "cooldown" };
-  }
+  if (stats.lastCorrectiveAt > 0 && sinceLast < CORRECTIVE_COOLDOWN_MS) return { show: false, reason: "cooldown" };
+
   write(KEY_LAST_CORRECTIVE, Date.now());
-  return { show: true, kind: "corrective", text: "Already copied — no Cmd+C needed" };
+  return { show: true, kind: "corrective", text: "Already copied — no Cmd+C needed", selects: stats.selects };
 }
 
 /** Test-only helper: wipe all nudge counters back to a clean slate. */

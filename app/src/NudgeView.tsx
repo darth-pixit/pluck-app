@@ -16,7 +16,10 @@ interface ShowPayload {
   durationMs?: number;
 }
 
-const DEFAULT_DURATION_MS = 800;
+// Must match NUDGE_LIFETIME_MS in lib.rs and the cumulative CSS keyframe
+// duration in index.css (.nudge-pill animation). Single source of truth
+// for these three timelines lives nowhere — bump all three together.
+const DEFAULT_DURATION_MS = 1100;
 
 export default function NudgeView() {
   const [shown, setShown] = useState<ShowPayload | null>(null);
