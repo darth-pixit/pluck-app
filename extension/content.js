@@ -13,6 +13,11 @@
   let lastRelease = 0;
   let clickCount = 0;
   let toastTimeout = null;
+  // Many of the new triggers below (mouseup, keyup, select, selectionchange)
+  // can fire for the same selection in quick succession. Dedupe within a short
+  // window so a single user gesture lands a single history entry.
+  let lastCapture = { text: "", at: 0 };
+  let selectionDebounce = null;
 
   // ── Toast UI ──────────────────────────────────────────────────────────────
 
@@ -136,10 +141,36 @@
 
   // ── Mouse tracking ────────────────────────────────────────────────────────
 
+  // Walk through shadow roots when the page uses custom elements (Material Web,
+  // Lit/Stencil, etc.). document.activeElement reports the shadow host; the
+  // real focused control lives at host.shadowRoot.activeElement (recursively).
+  function deepActiveElement() {
+    let el = null;
+    try { el = document.activeElement; } catch (_) { return null; }
+    while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+      el = el.shadowRoot.activeElement;
+    }
+    return el;
+  }
+
+  // mouseup re-targets to the shadow host, so e.target.tagName is the custom
+  // element, not the inner INPUT. Walk the composed path to find the real
+  // field the user clicked on.
+  function fieldFromEvent(e) {
+    const path = (typeof e.composedPath === "function") ? e.composedPath() : [];
+    for (let i = 0; i < path.length; i++) {
+      const n = path[i];
+      if (n && n.nodeType === 1 && (n.tagName === "INPUT" || n.tagName === "TEXTAREA")) {
+        return n;
+      }
+    }
+    return e.target || null;
+  }
+
   // Read the current selection inside an <input>/<textarea>. Such fields don't
   // contribute to window.getSelection(); they expose selection via their own
-  // selectionStart/End pair. Wrapped in try/catch because some input types
-  // (number, email in some engines) throw on selectionStart access.
+  // selectionStart/End pair. Wrapped in try/catch because some Firefox input
+  // types (number, email, tel, url) throw on selectionStart access.
   function getFieldSelection(el) {
     if (!el) return "";
     const tag = el.tagName;
@@ -152,8 +183,76 @@
       if (start == null || end == null || end <= start) return "";
       return el.value.substring(start, end);
     } catch (_) {
+      // Firefox throws on number/email/tel/url. We can't read the range, so
+      // best-effort fall back to the full value when this element is the
+      // currently focused control — that's the only state in which a user
+      // could have just produced a selection inside it.
+      try {
+        if (deepActiveElement() === el && el.value) return el.value;
+      } catch (__) {}
       return "";
     }
+  }
+
+  // Read whatever the user currently has selected, preferring a field if one
+  // is the focused/clicked target.
+  function readSelection(fieldHint) {
+    let text = "";
+    let isFieldSelect = false;
+    if (fieldHint) {
+      text = getFieldSelection(fieldHint).trim();
+      isFieldSelect = !!text;
+    }
+    if (!text) {
+      try {
+        const sel = window.getSelection();
+        if (sel) text = sel.toString().trim();
+      } catch (_) {}
+    }
+    return { text: text, isFieldSelect: isFieldSelect };
+  }
+
+  // Single funnel for every capture path (mouseup, keyup, select, selectionchange).
+  // History is saved unconditionally; clipboard is best-effort. This is a change
+  // from the original behaviour where clipboard failure silently dropped the
+  // entry — the popup should always reflect what the user selected.
+  function commitCapture(text, opts) {
+    const now = Date.now();
+    if (text === lastCapture.text && now - lastCapture.at < 1500) return;
+    lastCapture = { text: text, at: now };
+
+    try { chrome.runtime.sendMessage({ type: "SELECTION", text: text }); } catch (_) {}
+
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(text);
+      try {
+        if (window.Pluks) {
+          window.Pluks.track("selection_captured", {
+            char_count_bucket: window.Pluks.bucket(text.length),
+            was_drag: !!(opts && opts.isDrag),
+            was_multi_click: !!(opts && opts.isMultiClick),
+            was_field_select: !!(opts && opts.isFieldSelect),
+            source: (opts && opts.source) || "mouseup",
+            scheme: location.protocol.replace(":", ""),
+            content_kind: classify(text)
+          });
+          if (Math.random() < 0.25) {
+            window.Pluks.track("toast_shown", {
+              char_count_bucket: window.Pluks.bucket(text.length)
+            });
+          }
+        }
+      } catch (_) {}
+    }).catch((err) => {
+      try {
+        if (window.Pluks) {
+          var reason = "unknown";
+          if (err && /not allowed|denied|permission/i.test(err.message || "")) reason = "permission";
+          else if (window.top !== window) reason = "cross_origin";
+          window.Pluks.track("selection_capture_failed", { reason: reason });
+        }
+      } catch (_) {}
+    });
   }
 
   document.addEventListener("mousedown", (e) => {
@@ -176,7 +275,10 @@
     const dy = Math.abs(e.clientY - pressY);
     const isDrag = dx > 4 || dy > 4;
     const isMultiClick = clickCount >= 2;
-    const target = e.target;
+    // composedPath() finds the inner INPUT/TEXTAREA even when the page wraps
+    // it in a custom element (Material Web, Lit, Stencil, etc.) — without
+    // this, e.target is the shadow host and isField is wrongly false.
+    const target = fieldFromEvent(e);
     const tag = target && target.tagName;
     const isField = tag === "INPUT" || tag === "TEXTAREA";
 
@@ -192,56 +294,80 @@
 
     // Small delay to let the browser finalise the selection
     setTimeout(() => {
-      let text = "";
-      let isFieldSelect = false;
-      if (isField) {
-        text = getFieldSelection(target).trim();
-        isFieldSelect = !!text;
-      }
-      if (!text) {
-        const sel = window.getSelection();
-        if (sel) text = sel.toString().trim();
-      }
-      if (!text) return;
-
-      // Copy to clipboard
-      navigator.clipboard.writeText(text).then(() => {
-        showToast(text);
-        // Notify background to save to history
-        chrome.runtime.sendMessage({ type: "SELECTION", text });
-        if (isMultiClick) clickCount = 0;
-
-        // Anonymous instrumentation. Never sends `text`. Bucketed length only.
-        try {
-          if (window.Pluks) {
-            window.Pluks.track("selection_captured", {
-              char_count_bucket: window.Pluks.bucket(text.length),
-              was_drag: isDrag,
-              was_multi_click: isMultiClick,
-              was_field_select: isFieldSelect,
-              scheme: location.protocol.replace(":", ""),
-              content_kind: classify(text)
-            });
-            // Sample toast event ~25% to keep volume down.
-            if (Math.random() < 0.25) {
-              window.Pluks.track("toast_shown", {
-                char_count_bucket: window.Pluks.bucket(text.length)
-              });
-            }
-          }
-        } catch (_) {}
-      }).catch((err) => {
-        // Clipboard write blocked (e.g. some cross-origin frames)
-        try {
-          if (window.Pluks) {
-            var reason = "unknown";
-            if (err && /not allowed|denied|permission/i.test(err.message || "")) reason = "permission";
-            else if (window.top !== window) reason = "cross_origin";
-            window.Pluks.track("selection_capture_failed", { reason: reason });
-          }
-        } catch (_) {}
+      const r = readSelection(isField ? target : null);
+      if (!r.text) return;
+      commitCapture(r.text, {
+        isDrag: isDrag,
+        isMultiClick: isMultiClick,
+        isFieldSelect: r.isFieldSelect,
+        source: "mouseup"
       });
+      if (isMultiClick) clickCount = 0;
     }, 30);
   }, true);
+
+  // Keyboard-driven selections (Shift+arrows/Home/End/PageUp/PageDown, Cmd/Ctrl+A)
+  // never produce a mouseup, so they were previously invisible to Pluks.
+  document.addEventListener("keyup", (e) => {
+    const k = e.key;
+    const selectAll = (e.ctrlKey || e.metaKey) && (k === "a" || k === "A");
+    const shiftNav = e.shiftKey && (
+      k === "ArrowLeft" || k === "ArrowRight" ||
+      k === "ArrowUp" || k === "ArrowDown" ||
+      k === "Home" || k === "End" ||
+      k === "PageUp" || k === "PageDown"
+    );
+    if (!selectAll && !shiftNav) return;
+
+    setTimeout(() => {
+      const ae = deepActiveElement();
+      const isField = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
+      const r = readSelection(isField ? ae : null);
+      if (!r.text) return;
+      commitCapture(r.text, {
+        isDrag: false,
+        isMultiClick: false,
+        isFieldSelect: r.isFieldSelect,
+        source: "keyboard"
+      });
+    }, 0);
+  }, true);
+
+  // Native `select` event fires on inputs/textareas for any selection change
+  // inside them — covers context-menu "Select all", the page calling .select()
+  // programmatically, and double/triple-click-to-select inside fields.
+  document.addEventListener("select", (e) => {
+    const t = e.target;
+    if (!t || (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA")) return;
+    const text = getFieldSelection(t).trim();
+    if (!text) return;
+    commitCapture(text, {
+      isDrag: false,
+      isMultiClick: false,
+      isFieldSelect: true,
+      source: "select_event"
+    });
+  }, true);
+
+  // Catch-all for anything else: context-menu "Select all" on regular page
+  // text, contentEditable single-click-select-all behaviour, programmatic
+  // Range manipulation, etc. Heavily debounced and skipped right after a
+  // mouseup so the dedicated handlers above stay authoritative.
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(selectionDebounce);
+    selectionDebounce = setTimeout(() => {
+      if (Date.now() - lastRelease < 200) return;
+      const ae = deepActiveElement();
+      const isField = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
+      const r = readSelection(isField ? ae : null);
+      if (!r.text) return;
+      commitCapture(r.text, {
+        isDrag: false,
+        isMultiClick: false,
+        isFieldSelect: r.isFieldSelect,
+        source: "selectionchange"
+      });
+    }, 350);
+  });
 
 })();

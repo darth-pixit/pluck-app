@@ -96,6 +96,102 @@ test.describe("Content script", () => {
     await expect(page.locator("#__pluks_toast")).not.toBeVisible();
   });
 
+  test("single-click on an input nested inside a shadow root captures the value", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    // Click the inner input via piercing locator. mouseup target re-targets to
+    // the shadow host (<my-shadow-input>); the content script must walk the
+    // composedPath to find the real <input>.
+    await page.locator("my-shadow-input").locator("#shadow-input").click();
+    await page.waitForTimeout(300);
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history[0].text).toBe("shadow dom selected text");
+  });
+
+  test("Cmd/Ctrl+A inside a textarea is captured even without a mouse gesture", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    await page.locator("#kb-textarea").focus();
+    // Real keystroke — no mousedown/mouseup at all. Pre-fix this would be
+    // invisible to Pluks because capture only ran from mouseup.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.waitForTimeout(300);
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history[0].text).toBe("keyboard selectable text in a textarea");
+  });
+
+  test("programmatic .select() (no user gesture) is captured via the select event", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    // Trigger a JS .select() via a button. The select event fires on the input
+    // even though the user never interacted with it directly.
+    await page.locator("#programmatic-select").click();
+    await page.waitForTimeout(400);
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history.some((i) => i.text === "https://example.com/share/abc123")).toBe(true);
+  });
+
+  test("selections inside iframes are captured (all_frames injection)", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    const frame = page.frameLocator("#iframe-frame");
+    // Drag-select inside the iframe by dispatching a synthetic gesture in its
+    // document. With all_frames the content script runs in the iframe and
+    // captures this; without it, nothing lands.
+    await page.locator("#iframe-frame").contentFrame().locator("#iframe-prose").waitFor();
+    await frame.locator("body").evaluate(() => {
+      const el = document.getElementById("iframe-prose")!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const s = window.getSelection();
+      s?.removeAllRanges();
+      s?.addRange(range);
+      const downEvt = new MouseEvent("mousedown", { button: 0, clientX: 0, clientY: 0, bubbles: true });
+      const upEvt = new MouseEvent("mouseup", { button: 0, clientX: 100, clientY: 100, bubbles: true });
+      document.dispatchEvent(downEvt);
+      document.dispatchEvent(upEvt);
+    });
+    await page.waitForTimeout(400);
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history.some((i) => i.text.includes("iframe content selectable here"))).toBe(true);
+  });
+
+  test("history is saved even when clipboard.writeText rejects", async ({ context, baseURL }) => {
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    // Force the clipboard API to reject so we exercise the path where the
+    // pre-fix code dropped the entry on the floor.
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error("not allowed")) },
+      });
+    });
+    await selectTextById(page, "prose");
+    const [worker] = context.serviceWorkers();
+    const history = await worker.evaluate(async () => {
+      const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
+      return history;
+    });
+    expect(history.some((i) => i.text.includes("quick brown fox"))).toBe(true);
+  });
+
   test("history is capped at 100 entries", async ({ context, baseURL }) => {
     const page = await context.newPage();
     await page.goto(baseURL);

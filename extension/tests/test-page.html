@@ -17,5 +17,26 @@
     style="width: 320px;"
   />
   <input id="plain-input" type="text" value="not selected on click" style="width: 320px;" />
+  <textarea id="kb-textarea" style="width: 320px; height: 60px;">keyboard selectable text in a textarea</textarea>
+  <button id="programmatic-select" onclick="document.getElementById('share-url').select()">Programmatic select</button>
+  <iframe id="iframe-frame" src="iframe-content.html" style="width: 320px; height: 60px;"></iframe>
+  <my-shadow-input></my-shadow-input>
+  <script>
+    // Lightweight custom element so we can verify the content script reaches
+    // an <input> nested inside a shadow root (Material Web / Lit / Stencil
+    // designs all wrap inputs this way).
+    customElements.define("my-shadow-input", class extends HTMLElement {
+      connectedCallback() {
+        const root = this.attachShadow({ mode: "open" });
+        const input = document.createElement("input");
+        input.id = "shadow-input";
+        input.type = "text";
+        input.value = "shadow dom selected text";
+        input.onclick = () => input.select();
+        input.style.width = "320px";
+        root.appendChild(input);
+      }
+    });
+  </script>
 </body>
 </html>

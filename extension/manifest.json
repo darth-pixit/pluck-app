@@ -27,7 +27,8 @@
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["config.js", "analytics.js", "content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "permissions": [
