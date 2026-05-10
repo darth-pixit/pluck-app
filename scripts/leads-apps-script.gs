@@ -9,13 +9,23 @@
  * Setup:
  *  1. Create a Google Sheet. First row headers (recommended order):
  *       timestamp | email | persona | platform | referrer_host | user_agent
- *  2. Extensions → Apps Script. Paste this file. Save.
- *  3. Deploy → New deployment → Type: Web app.
+ *     Copy its ID from the URL (the long token between /d/ and /edit) and
+ *     paste it into LEADS_SHEET_ID below.
+ *  2. script.google.com → New project. Paste this file. Save.
+ *     (Standalone project is fine — we open the sheet by ID rather than
+ *     relying on a bound spreadsheet, so getActiveSpreadsheet() is not used.)
+ *  3. From the editor, run `smokeTest` once. Accept the OAuth prompt to
+ *     grant the Spreadsheet scope to the deployer identity. A row labelled
+ *     "test@example.com / engineer" should appear in the sheet.
+ *  4. Deploy → New deployment → Type: Web app.
  *     - Execute as: Me
  *     - Who has access: Anyone (required for the website to POST anonymously)
- *  4. Copy the Web app URL. Paste it into website/demo.js as `LEADS_ENDPOINT`.
- *  5. Test by submitting the download form on the deployed site;
- *     a row should appear in the sheet within a few seconds.
+ *  5. Copy the Web app URL. Paste it into website/demo.js as `LEADS_ENDPOINT`.
+ *  6. Test by submitting the download form on the deployed site;
+ *     a row should appear in the sheet within a few seconds. When pushing
+ *     edits, use Manage deployments → edit → New version (keeps the URL
+ *     stable). Creating a brand-new deployment rotates the URL and you'll
+ *     have to re-paste it into demo.js.
  *
  * Privacy note:
  *  - Apps Script web apps deployed "Anyone" accept anonymous POSTs from the
@@ -26,6 +36,8 @@
  * Payload shape (text/plain JSON, sent via sendBeacon):
  *   { email, persona, platform?, referrer_host?, user_agent? }
  */
+
+const LEADS_SHEET_ID = '1a08WC0DwzedpCggV3zV4cX9UbL6T0Y-tjG2QXc-Z-h4';
 
 const VALID_PERSONAS = [
   'engineer', 'designer', 'pm', 'researcher',
@@ -45,7 +57,7 @@ function doPost(e) {
     if (data.email.length > 256) return _ok('email_too_long');
     if (!VALID_PERSONAS.includes(data.persona)) return _ok('bad_persona');
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.openById(LEADS_SHEET_ID);
     const sheet = ss.getSheetByName('Leads') || ss.getActiveSheet();
 
     sheet.appendRow([
