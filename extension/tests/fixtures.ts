@@ -27,6 +27,14 @@ function startTestServer() {
     const ext = path.extname(fp);
     const ct = ext === ".html" ? "text/html" : ext === ".js" ? "text/javascript" : "text/plain";
     res.setHeader("content-type", ct + "; charset=utf-8");
+    // Deny clipboard-write for the no-clipboard iframe fixture so the content
+    // script's navigator.clipboard.writeText actually rejects — the only way
+    // to genuinely test the "history saved even when clipboard fails" path
+    // (overriding navigator.clipboard from page.evaluate doesn't reach the
+    // content script's isolated world).
+    if (p === "/iframe-no-clipboard.html") {
+      res.setHeader("permissions-policy", "clipboard-write=()");
+    }
     res.end(fs.readFileSync(fp));
   });
   return new Promise<{ server: http.Server; baseURL: string }>((resolve) => {

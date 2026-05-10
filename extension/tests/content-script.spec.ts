@@ -175,21 +175,43 @@ test.describe("Content script", () => {
   test("history is saved even when clipboard.writeText rejects", async ({ context, baseURL }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
-    // Force the clipboard API to reject so we exercise the path where the
-    // pre-fix code dropped the entry on the floor.
-    await page.evaluate(() => {
-      Object.defineProperty(navigator, "clipboard", {
-        configurable: true,
-        value: { writeText: () => Promise.reject(new Error("not allowed")) },
-      });
+    // The no-clipboard iframe is served with `Permissions-Policy:
+    // clipboard-write=()`, so the content script's navigator.clipboard.writeText
+    // genuinely rejects there. Pre-fix this dropped the entry; post-fix the
+    // SELECTION message is sent before the clipboard call, so history persists.
+    const frame = page.frameLocator("#no-clipboard-iframe");
+    await frame.locator("#nc-prose").waitFor();
+    const ncFrame = page.frames().find((f) => /iframe-no-clipboard\.html$/.test(f.url()))!;
+    expect(ncFrame).toBeTruthy();
+    // Sanity check: confirm clipboard-write is actually denied in this frame.
+    const clipboardDenied = await ncFrame.evaluate(async () => {
+      try {
+        await navigator.clipboard.writeText("probe");
+        return false;
+      } catch {
+        return true;
+      }
     });
-    await selectTextById(page, "prose");
+    expect(clipboardDenied).toBe(true);
+    await ncFrame.evaluate(() => {
+      const el = document.getElementById("nc-prose")!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const s = window.getSelection();
+      s?.removeAllRanges();
+      s?.addRange(range);
+      const downEvt = new MouseEvent("mousedown", { button: 0, clientX: 0, clientY: 0, bubbles: true });
+      const upEvt = new MouseEvent("mouseup", { button: 0, clientX: 100, clientY: 100, bubbles: true });
+      document.dispatchEvent(downEvt);
+      document.dispatchEvent(upEvt);
+    });
+    await page.waitForTimeout(400);
     const [worker] = context.serviceWorkers();
     const history = await worker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
-    expect(history.some((i) => i.text.includes("quick brown fox"))).toBe(true);
+    expect(history.some((i) => i.text.includes("no clipboard available here"))).toBe(true);
   });
 
   test("history is capped at 100 entries", async ({ context, baseURL }) => {
