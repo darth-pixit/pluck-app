@@ -55,9 +55,9 @@
   }
 
   // Allowed property keys per event. `track()` drops anything not on the list.
+  // Note: $pageview / $pageleave / scroll-depth / web-vitals are captured
+  // natively by PostHog (see init() below) — they don't go through track().
   var SCHEMA = {
-    page_view:               ["path", "referrer_host", "viewport_w"],
-    scroll_depth:            ["percent"],
     download_clicked:        ["platform", "cta_location"],
     download_modal_opened:   ["platform"],
     download_modal_closed:   ["platform", "via"],
@@ -132,8 +132,14 @@
     try {
       window.posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
+        // Autocapture (clicks/inputs) stays off so we never record form
+        // contents. Pageview / pageleave / scroll / web-vitals are PostHog's
+        // standard Web Analytics signals — turning them on lights up the
+        // built-in dashboard and is safe for a static marketing site.
         autocapture: false,
-        capture_pageview: false,
+        capture_pageview: true,
+        capture_pageleave: true,
+        capture_performance: { web_vitals: true },
         disable_session_recording: true,
         persistence: "localStorage",
         bootstrap: { distinctID: anonId() },
@@ -169,32 +175,10 @@
     } catch (_) {}
   }
 
-  // ── page_view + privacy_viewed ──────────────────────────────────────────
-  var path = location.pathname || "/";
-  if (/privacy\.html?$/.test(path)) {
+  // ── privacy_viewed (custom funnel marker; $pageview fires natively) ─────
+  if (/privacy\.html?$/.test(location.pathname || "/")) {
     track("privacy_viewed", { from_path: document.referrer ? new URL(document.referrer).pathname : "" });
-  } else {
-    track("page_view", {
-      path: path,
-      referrer_host: superProps().referrer_host,
-      viewport_w: window.innerWidth
-    });
   }
-
-  // ── Scroll depth ────────────────────────────────────────────────────────
-  var DEPTHS = [25, 50, 75, 100];
-  var hit = {};
-  function onScroll() {
-    var doc = document.documentElement;
-    var max = doc.scrollHeight - window.innerHeight;
-    if (max <= 0) return;
-    var pct = Math.round((window.scrollY / max) * 100);
-    for (var i = 0; i < DEPTHS.length; i++) {
-      var d = DEPTHS[i];
-      if (pct >= d && !hit[d]) { hit[d] = true; track("scroll_depth", { percent: d }); }
-    }
-  }
-  window.addEventListener("scroll", onScroll, { passive: true });
 
   // ── CTA delegation ──────────────────────────────────────────────────────
   function ctaLocation(el) {
