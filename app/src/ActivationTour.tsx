@@ -220,6 +220,11 @@ export default function ActivationTour({ onDone }: Props) {
             {copy.nextLabel}
           </button>
         </div>
+
+        <p className="tour-footnote">
+          ✓ Password fields are skipped automatically — Pluks never captures
+          what you type into a secure input.
+        </p>
       </div>
     </div>
   );

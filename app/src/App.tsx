@@ -140,6 +140,10 @@ function SetupScreen({
       </div>
       <p className="setup-hint">After granting each permission, come back here — this screen updates automatically.</p>
       <p className="setup-privacy-note">
+        <strong>Passwords stay private.</strong> Pluks detects password fields
+        via macOS Accessibility and never captures what's inside them.
+      </p>
+      <p className="setup-privacy-note">
         Pluks sends anonymous usage stats and crash reports to help us improve.
         Manage in <strong>⚙ Preferences</strong> after setup.
       </p>

@@ -64,6 +64,12 @@
   you select text. When a text selection is detected, it simulates a copy operation and
   saves the result to a local SQLite database stored in your application data folder.
   This database never leaves your computer.</p>
+  <p><strong>Password fields are skipped automatically.</strong> Before every
+  capture, Pluks asks macOS Accessibility for the role of the focused element.
+  If it's <code>AXSecureTextField</code> — the role used by every standard
+  password input on macOS, including Safari logins, the system unlock prompt,
+  and password managers — Pluks does not simulate a copy, does not read the
+  clipboard, and stores nothing in history.</p>
 
   <h2>How the browser extension works</h2>
   <p>The Pluks browser extension listens for <code>mouseup</code> events in your browser tabs
