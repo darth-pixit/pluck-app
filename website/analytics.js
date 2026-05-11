@@ -131,6 +131,12 @@
       $lib:              "web",
       $lib_version:      LIB_VERSION,
       $browser_language: navigator.language || "unknown",
+      // Tells PostHog this event came via our managed reverse proxy.
+      // posthog-js sets this automatically when api_host is non-default;
+      // we have to set it manually since we're hand-rolling the wire format.
+      // Without it, the "Reverse proxy" health check stays red even though
+      // events are arriving on the proxy hostname.
+      $lib_custom_api_host: POSTHOG_HOST,
       surface:           "web",
       release:           RELEASE
     };
