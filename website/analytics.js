@@ -19,7 +19,10 @@
   "use strict";
 
   var POSTHOG_KEY  = "phc_rAzNboDZLDXo4ePmSUaHGPF7aCbinStawno6HYGTgEte";
-  var POSTHOG_HOST = "https://us.i.posthog.com";
+  // Use our managed reverse proxy. Routes through pluks.app so ad blockers
+  // can't filter by `*.posthog.com`. Falls back fine if DNS ever breaks —
+  // the project still accepts requests on `https://us.i.posthog.com`.
+  var POSTHOG_HOST = "https://e.pluks.app";
   var SENTRY_DSN   = "https://PLACEHOLDER_REPLACE_AT_DEPLOY@o0.ingest.sentry.io/0";
   var RELEASE      = "pluks-web@2026.04";
   var LIB_VERSION  = "pluks-web-1.0.0";
