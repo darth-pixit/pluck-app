@@ -195,23 +195,56 @@
   }
 
   // ── $pageview + $pageleave (drives the Web Analytics dashboard) ─────────
-  var _maxScrollPct = 0;
+  // Track both top-of-viewport ("scroll") and bottom-of-viewport ("content")
+  // positions so PostHog's scroll-depth heatmap can distinguish "user saw
+  // the bottom of the page" (content) from "user scrolled all the way down"
+  // (scroll). Property names match what posthog-js's ScrollManager emits.
+  var _scroll = {
+    lastScrollY:    0,
+    maxScrollY:     0,
+    lastContentY:   0,
+    maxContentY:    0,
+    maxScrollHeight: 0   // scrollable distance (scrollHeight - innerHeight)
+  };
   function recordScroll() {
     var doc = document.documentElement;
-    var max = doc.scrollHeight - window.innerHeight;
-    if (max <= 0) return;
-    var pct = Math.min(100, Math.max(0, Math.round((window.scrollY / max) * 100)));
-    if (pct > _maxScrollPct) _maxScrollPct = pct;
+    var maxScroll = Math.max(0, doc.scrollHeight - window.innerHeight);
+    var y = window.scrollY || 0;
+    var contentY = y + window.innerHeight;
+    _scroll.lastScrollY  = y;
+    _scroll.lastContentY = contentY;
+    if (y > _scroll.maxScrollY)        _scroll.maxScrollY  = y;
+    if (contentY > _scroll.maxContentY) _scroll.maxContentY = contentY;
+    if (maxScroll > _scroll.maxScrollHeight) _scroll.maxScrollHeight = maxScroll;
   }
   window.addEventListener("scroll", recordScroll, { passive: true });
+  // Capture the initial position too — even users who never scroll have
+  // seen one viewport-worth of content.
+  recordScroll();
 
   function firePageview() {
     sendEvent("$pageview", standardProps(), false);
   }
   function firePageleave() {
+    var docHeight = Math.max(
+      document.documentElement.scrollHeight,
+      _scroll.maxScrollHeight + window.innerHeight
+    );
+    var pct = function (n, d) {
+      if (d <= 0) return 1;
+      var p = n / d;
+      return p < 0 ? 0 : (p > 1 ? 1 : p);
+    };
     var props = Object.assign({}, standardProps(), {
-      $prev_pageview_max_scroll_percentage: _maxScrollPct,
-      $prev_pageview_pathname:              location.pathname || "/"
+      $prev_pageview_pathname:               location.pathname || "/",
+      $prev_pageview_last_scroll:            _scroll.lastScrollY,
+      $prev_pageview_last_scroll_percentage: pct(_scroll.lastScrollY, _scroll.maxScrollHeight),
+      $prev_pageview_max_scroll:             _scroll.maxScrollY,
+      $prev_pageview_max_scroll_percentage:  pct(_scroll.maxScrollY,  _scroll.maxScrollHeight),
+      $prev_pageview_last_content:           _scroll.lastContentY,
+      $prev_pageview_last_content_percentage: pct(_scroll.lastContentY, docHeight),
+      $prev_pageview_max_content:            _scroll.maxContentY,
+      $prev_pageview_max_content_percentage: pct(_scroll.maxContentY,  docHeight)
     });
     sendEvent("$pageleave", props, true);
   }
