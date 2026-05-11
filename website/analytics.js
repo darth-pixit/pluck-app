@@ -132,12 +132,18 @@
     try {
       window.posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
+        // Opt into the modern PostHog default config. Without this, the SDK
+        // falls back to legacy defaults that route capture to the deprecated
+        // /e/ endpoint, which new projects reject with 401. The dated string
+        // is PostHog's snapshot-versioning scheme — bump it when their docs
+        // recommend a newer one.
+        defaults: '2026-01-30',
         // Autocapture (clicks/inputs) stays off so we never record form
         // contents. Pageview / pageleave / scroll / web-vitals are PostHog's
         // standard Web Analytics signals — turning them on lights up the
         // built-in dashboard and is safe for a static marketing site.
         autocapture: false,
-        capture_pageview: true,
+        capture_pageview: 'history_change',
         capture_pageleave: true,
         capture_performance: { web_vitals: true },
         disable_session_recording: true,

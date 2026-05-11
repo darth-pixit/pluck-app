@@ -165,6 +165,9 @@ export async function initAnalytics(): Promise<void> {
     try {
       posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
+        // Opt into modern defaults — otherwise the SDK routes capture to the
+        // legacy /e/ endpoint, which the project rejects with 401.
+        defaults: '2026-01-30',
         autocapture: false,
         capture_pageview: false,
         disable_session_recording: true,
