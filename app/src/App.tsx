@@ -394,10 +394,12 @@ export default function App() {
     return () => { unlisten.then(fn => fn()); };
   }, [runNudge]);
 
-  // The Rust copy processor emits `capture-suppressed` when it declines to
-  // auto-copy because focus is inside an editable text field (drag-to-replace
-  // gesture). Forward it as analytics so we can see the AX path firing in
-  // the wild.
+  // The Rust copy processor emits `capture-suppressed` when a capture lands
+  // inside an editable text field (drag-to-replace gesture). The selection
+  // still goes into history; we just restore the prior clipboard so the
+  // user's Cmd+V target survives. Forwarded as analytics so we can see the
+  // AX path firing in the wild — payload distinguishes the variants
+  // (`editable_focus_restored` vs `editable_focus_empty`).
   useEffect(() => {
     const unlisten = listen<string>("capture-suppressed", event => {
       track("selection_capture_failed", { reason: event.payload || "unknown" });

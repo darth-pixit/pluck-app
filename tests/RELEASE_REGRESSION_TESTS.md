@@ -128,13 +128,14 @@ test files is the source of truth — this annotation is a navigation aid.
 - **Steps:** Triple-click in TextEdit.
 - **Expect:** Whole line lands in history.
 
-### A2.4 Selection inside editable field is suppressed [MUST PASS]
-- **Pre:** Focus inside an editable text field (TextEdit document, Notes app).
-- **Steps:** Drag-select text within that field.
+### A2.4 Selection inside editable field is captured but clipboard preserved [MUST PASS]
+- **Pre:** Focus inside an editable text field (TextEdit document, Notes app). Place a known string `X` on the clipboard first (e.g. copy "abc" from somewhere else).
+- **Steps:** Drag-select text within that field, then immediately Cmd+V into a different app **without** typing in between.
 - **Expect:**
-  - Text is **not** captured to history.
-  - Clipboard is **not** overwritten.
-  - PostHog `selection_capture_failed` with `reason="editable_focus"` fired.
+  - The drag-selected text **is** added to history (top item — available to re-paste at the next position).
+  - The clipboard still contains `X`, so Cmd+V pastes "abc", not the drag-selected text.
+  - Typing inside the editable field replaces the selection cleanly with no leftover clipboard pollution.
+  - PostHog `selection_capture_failed` with `reason="editable_focus_restored"` fired (or `editable_focus_empty` if the selection vanished mid-capture).
 
 ### A2.5 Selection while panel visible is ignored [MUST PASS]
 - **Pre:** Panel open.
