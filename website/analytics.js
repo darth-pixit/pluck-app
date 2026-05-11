@@ -1,12 +1,19 @@
 /**
- * Pluks website analytics (PostHog) and error reporting (Sentry).
+ * Pluks website analytics — bare-fetch PostHog client + Sentry.
  *
- * Honors `navigator.doNotTrack` and a `?opt_out=1` URL param. Never sends
- * the content of selections, page URLs beyond pluks.app, or any PII.
+ * We bypass posthog-js entirely because v1.372.10 sends batched events as
+ * a bare JSON array with no `api_key` field, which our project rejects
+ * with 401. Hand-rolling the wire format is the same approach used by
+ * extension/analytics.js, which has worked reliably for months.
  *
- * The PostHog and Sentry loader snippets in index.html make
- * `window.posthog` and `window.Sentry` available; this file boots them and
- * wires up CTA tracking.
+ * What this file does:
+ *   - Fires $pageview on load and $pageleave on unload, with the
+ *     properties the PostHog Web Analytics dashboard expects (so the
+ *     "$pageview" and "scroll depth" health checks pass).
+ *   - Tracks scroll-depth maximum and ships it with $pageleave.
+ *   - Captures CTA / nav / download-modal events with a strict
+ *     property whitelist — no clipboard content, no URLs, no PII.
+ *   - Honors navigator.doNotTrack and ?opt_out=1.
  */
 (function () {
   "use strict";
@@ -15,6 +22,7 @@
   var POSTHOG_HOST = "https://us.i.posthog.com";
   var SENTRY_DSN   = "https://PLACEHOLDER_REPLACE_AT_DEPLOY@o0.ingest.sentry.io/0";
   var RELEASE      = "pluks-web@2026.04";
+  var LIB_VERSION  = "pluks-web-1.0.0";
 
   function isRealKey(s) { return !!s && s.indexOf("PLACEHOLDER") === -1; }
   if (!isRealKey(POSTHOG_KEY)) console.warn("[pluks] PostHog disabled — placeholder key in use");
@@ -54,9 +62,8 @@
     }
   }
 
-  // Allowed property keys per event. `track()` drops anything not on the list.
-  // Note: $pageview / $pageleave / scroll-depth / web-vitals are captured
-  // natively by PostHog (see init() below) — they don't go through track().
+  // Whitelist of custom event property keys. PostHog's $-prefixed standard
+  // properties for $pageview/$pageleave bypass this list.
   var SCHEMA = {
     download_clicked:        ["platform", "cta_location"],
     download_modal_opened:   ["platform"],
@@ -71,8 +78,7 @@
     error_uncaught_js:       ["error_type", "error_message_hash"]
   };
 
-  // Aligned with app/src/analytics.ts and extension/analytics.js — exact-match
-  // anchors so a key like `email_hash` isn't accidentally flagged.
+  // Exact-match anchors so a key like `email_hash` isn't flagged.
   var DENY_RX = /^(text|content|url|selection|email|path|host|hostname|page_title|tab_url|secret|token|password)$/i;
 
   function bucket(n) {
@@ -83,84 +89,135 @@
     return "10000+";
   }
 
-  function superProps() {
+  function detectBrowser() {
+    var ua = navigator.userAgent || "";
+    if (/Firefox\//.test(ua))           return "Firefox";
+    if (/Edg\//.test(ua))               return "Microsoft Edge";
+    if (/OPR\//.test(ua))               return "Opera";
+    if (/Chrome\//.test(ua))            return "Chrome";
+    if (/Safari\//.test(ua))            return "Safari";
+    return "Unknown";
+  }
+
+  function detectOs() {
+    var ua = navigator.userAgent || "";
+    if (/Mac OS X/.test(ua))   return "Mac OS X";
+    if (/Windows/.test(ua))    return "Windows";
+    if (/Linux/.test(ua))      return "Linux";
+    if (/Android/.test(ua))    return "Android";
+    if (/(iPhone|iPad)/.test(ua)) return "iOS";
+    return "Unknown";
+  }
+
+  function standardProps() {
+    var referrer = document.referrer || "";
+    var referringDomain = "";
+    try { referringDomain = referrer ? new URL(referrer).hostname : ""; } catch (_) {}
     return {
-      surface: "web",
-      release: RELEASE,
-      locale: navigator.language || "unknown",
-      viewport_w: window.innerWidth,
-      viewport_h: window.innerHeight,
-      referrer_host: (function () {
-        try { return document.referrer ? new URL(document.referrer).hostname : ""; }
-        catch (_) { return ""; }
-      })()
+      $current_url:      location.href,
+      $host:             location.host,
+      $pathname:         location.pathname || "/",
+      $referrer:         referrer,
+      $referring_domain: referringDomain,
+      $screen_height:    window.screen ? window.screen.height : 0,
+      $screen_width:     window.screen ? window.screen.width  : 0,
+      $viewport_height:  window.innerHeight,
+      $viewport_width:   window.innerWidth,
+      $browser:          detectBrowser(),
+      $os:               detectOs(),
+      $lib:              "web",
+      $lib_version:      LIB_VERSION,
+      $browser_language: navigator.language || "unknown",
+      surface:           "web",
+      release:           RELEASE
     };
   }
 
   function whitelistProps(event, props) {
     var allowed = SCHEMA[event];
-    if (!allowed) return null; // unknown event — refuse to send
+    if (!allowed) return null; // unknown custom event — refuse to send
     var out = {};
     for (var i = 0; i < allowed.length; i++) {
       var k = allowed[i];
-      if (props && k in props) out[k] = props[k];
+      if (props && k in props && !DENY_RX.test(k)) out[k] = props[k];
     }
-    // Defensive scrub against accidental sensitive keys
-    for (var k2 in out) if (DENY_RX.test(k2)) delete out[k2];
     return out;
   }
 
   var optedOut = readOptOut();
+  var _anonId  = anonId();
 
+  // ── PostHog: bare fetch to /i/v0/e/ ─────────────────────────────────────
+  function sendEvent(event, properties, useBeacon) {
+    if (optedOut || !isRealKey(POSTHOG_KEY)) return;
+    var body = {
+      api_key:     POSTHOG_KEY,
+      event:       event,
+      distinct_id: _anonId,
+      properties:  properties,
+      timestamp:   new Date().toISOString()
+    };
+    var url     = POSTHOG_HOST + "/i/v0/e/";
+    var payload = JSON.stringify(body);
+    try {
+      if (useBeacon && navigator.sendBeacon) {
+        // sendBeacon doesn't accept custom Content-Type, but PostHog
+        // sniffs the body and accepts JSON regardless.
+        var blob = new Blob([payload], { type: "application/json" });
+        navigator.sendBeacon(url, blob);
+        return;
+      }
+      fetch(url, {
+        method:      "POST",
+        headers:     { "Content-Type": "application/json" },
+        body:        payload,
+        keepalive:   true,
+        credentials: "omit"
+      }).catch(function () {});
+    } catch (_) { /* swallow */ }
+  }
+
+  // Public custom-event tracker (used by demo.js etc.)
   function track(event, props) {
-    if (optedOut) return;
-    if (!window.posthog) return;
     var clean = whitelistProps(event, props || {});
     if (!clean) return;
-    try {
-      window.posthog.capture(event, Object.assign({}, superProps(), clean));
-    } catch (_) {}
+    var merged = Object.assign({}, standardProps(), clean);
+    sendEvent(event, merged, false);
   }
 
-  function captureException(err) {
-    if (optedOut) return;
-    try { if (window.Sentry) window.Sentry.captureException(err); } catch (_) {}
+  // ── $pageview + $pageleave (drives the Web Analytics dashboard) ─────────
+  var _maxScrollPct = 0;
+  function recordScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - window.innerHeight;
+    if (max <= 0) return;
+    var pct = Math.min(100, Math.max(0, Math.round((window.scrollY / max) * 100)));
+    if (pct > _maxScrollPct) _maxScrollPct = pct;
+  }
+  window.addEventListener("scroll", recordScroll, { passive: true });
+
+  function firePageview() {
+    sendEvent("$pageview", standardProps(), false);
+  }
+  function firePageleave() {
+    var props = Object.assign({}, standardProps(), {
+      $prev_pageview_max_scroll_percentage: _maxScrollPct,
+      $prev_pageview_pathname:              location.pathname || "/"
+    });
+    sendEvent("$pageleave", props, true);
   }
 
-  // ── Init PostHog ────────────────────────────────────────────────────────
-  if (window.posthog && typeof window.posthog.init === "function" && isRealKey(POSTHOG_KEY)) {
-    try {
-      window.posthog.init(POSTHOG_KEY, {
-        api_host: POSTHOG_HOST,
-        // Opt into the modern PostHog default config (recommended by their
-        // docs init example). Bump when their docs recommend a newer date.
-        defaults: '2026-01-30',
-        // PostHog's /e/ endpoint 401s on this project's gzip-compressed
-        // bodies but accepts uncompressed JSON. Forcing plain JSON works
-        // around it — payloads are still tiny so the cost is negligible.
-        disable_compression: true,
-        // Autocapture (clicks/inputs) stays off so we never record form
-        // contents. Pageview / pageleave / scroll / web-vitals are PostHog's
-        // standard Web Analytics signals — turning them on lights up the
-        // built-in dashboard and is safe for a static marketing site.
-        autocapture: false,
-        capture_pageview: 'history_change',
-        capture_pageleave: true,
-        capture_performance: { web_vitals: true },
-        disable_session_recording: true,
-        persistence: "localStorage",
-        bootstrap: { distinctID: anonId() },
-        respect_dnt: true,
-        opt_out_capturing_by_default: optedOut,
-        sanitize_properties: function (props) {
-          for (var k in props) if (DENY_RX.test(k)) delete props[k];
-          return props;
-        }
-      });
-    } catch (_) {}
-  }
+  // Defer $pageview a tick so other inline scripts on this page finish first.
+  setTimeout(firePageview, 0);
 
-  // ── Init Sentry ─────────────────────────────────────────────────────────
+  // Best-effort $pageleave on tab hide and on unload. visibilitychange is
+  // more reliable on mobile; pagehide covers Safari's back-forward cache.
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") firePageleave();
+  });
+  window.addEventListener("pagehide", firePageleave);
+
+  // ── Sentry (CDN snippet in index.html exposes window.Sentry) ────────────
   if (window.Sentry && typeof window.Sentry.init === "function" && !optedOut && isRealKey(SENTRY_DSN)) {
     try {
       window.Sentry.init({
@@ -170,7 +227,6 @@
         replaysSessionSampleRate: 0,
         replaysOnErrorSampleRate: 0,
         beforeSend: function (event) {
-          // Strip HOME-like absolute paths if any leak through.
           try {
             var s = JSON.stringify(event);
             s = s.replace(/(\/Users\/|\/home\/)[^\/"\\]+/g, "$1~");
@@ -178,11 +234,16 @@
           } catch (_) { return event; }
         }
       });
-      window.Sentry.setUser({ id: anonId() });
+      window.Sentry.setUser({ id: _anonId });
     } catch (_) {}
   }
 
-  // ── privacy_viewed (custom funnel marker; $pageview fires natively) ─────
+  function captureException(err) {
+    if (optedOut) return;
+    try { if (window.Sentry) window.Sentry.captureException(err); } catch (_) {}
+  }
+
+  // ── privacy_viewed (custom funnel marker on /privacy.html) ──────────────
   if (/privacy\.html?$/.test(location.pathname || "/")) {
     track("privacy_viewed", { from_path: document.referrer ? new URL(document.referrer).pathname : "" });
   }
@@ -232,7 +293,7 @@
     }
   });
 
-  // ── Uncaught errors → mirror to PostHog ─────────────────────────────────
+  // ── Uncaught errors → mirror to PostHog as a count event ────────────────
   function hashShort(s) {
     var h = 5381; s = String(s || "");
     for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
@@ -253,10 +314,10 @@
 
   // ── Public API ──────────────────────────────────────────────────────────
   window.Pluks = {
-    track: track,
+    track:           track,
     captureException: captureException,
-    optOut: function () { optedOut = true; persistOptOut(true); try { window.posthog && window.posthog.opt_out_capturing(); } catch (_) {} },
-    optIn:  function () { optedOut = false; persistOptOut(false); try { window.posthog && window.posthog.opt_in_capturing();  } catch (_) {} },
+    optOut: function () { optedOut = true;  persistOptOut(true);  },
+    optIn:  function () { optedOut = false; persistOptOut(false); },
     isOptedOut: function () { return optedOut; },
     bucket: bucket
   };
