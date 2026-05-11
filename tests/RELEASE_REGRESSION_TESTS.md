@@ -128,13 +128,26 @@ test files is the source of truth — this annotation is a navigation aid.
 - **Steps:** Triple-click in TextEdit.
 - **Expect:** Whole line lands in history.
 
-### A2.4 Selection inside editable field is suppressed [MUST PASS]
-- **Pre:** Focus inside an editable text field (TextEdit document, Notes app).
-- **Steps:** Drag-select text within that field.
+### A2.4 Selection inside editable field IS captured [MUST PASS]
+- **Pre:** Focus inside an editable text field (TextEdit document, Notes app,
+  WhatsApp composer, Terminal.app text view).
+- **Steps:** Drag-select 2–3 words within that field.
+- **Expect:**
+  - Text **is** captured to history.
+  - Clipboard **is** overwritten with the selection.
+  - No `capture-suppressed` event emitted.
+- **Note:** The select-to-replace-before-paste flow is intentionally broken
+  by this — Cmd+V after select will paste the just-selected text, not the
+  prior clipboard. Delete-then-paste is the supported replace pattern.
+
+### A2.4b Selection inside password field is suppressed [MUST PASS]
+- **Pre:** Focus inside an `AXSecureTextField` (Safari password input, the
+  macOS unlock prompt, 1Password's create-password sheet).
+- **Steps:** Drag-select within the password field.
 - **Expect:**
   - Text is **not** captured to history.
   - Clipboard is **not** overwritten.
-  - PostHog `selection_capture_failed` with `reason="editable_focus"` fired.
+  - PostHog `selection_capture_failed` with `reason="secure_field"` fired.
 
 ### A2.5 Selection while panel visible is ignored [MUST PASS]
 - **Pre:** Panel open.

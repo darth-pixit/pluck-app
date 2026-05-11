@@ -395,9 +395,8 @@ export default function App() {
   }, [runNudge]);
 
   // The Rust copy processor emits `capture-suppressed` when it declines to
-  // auto-copy because focus is inside an editable text field (drag-to-replace
-  // gesture). Forward it as analytics so we can see the AX path firing in
-  // the wild.
+  // auto-copy because focus is inside a password field. Forward it as
+  // analytics so we can confirm the AX path is gating the right thing.
   useEffect(() => {
     const unlisten = listen<string>("capture-suppressed", event => {
       track("selection_capture_failed", { reason: event.payload || "unknown" });
