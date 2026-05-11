@@ -210,12 +210,82 @@
   // Defer $pageview a tick so other inline scripts on this page finish first.
   setTimeout(firePageview, 0);
 
-  // Best-effort $pageleave on tab hide and on unload. visibilitychange is
-  // more reliable on mobile; pagehide covers Safari's back-forward cache.
+  // ── Core Web Vitals (LCP / CLS / FCP) ───────────────────────────────────
+  // Inline PerformanceObserver-based capture so we don't pull a CDN script.
+  // Values report on pagehide together with $pageleave (PostHog dashboard
+  // reads $web_vitals_<METRIC>_value and $web_vitals_<METRIC>_event props).
+  // INP is intentionally skipped — its measurement needs event-timing
+  // bookkeeping that's not worth ~3KB of extra code for a marketing page.
+  var _vitals = {};
+  var VITAL_THRESHOLDS = { LCP: [2500, 4000], FCP: [1800, 3000], CLS: [0.1, 0.25] };
+  function ratingFor(name, value) {
+    var t = VITAL_THRESHOLDS[name];
+    if (!t) return "unknown";
+    if (value <= t[0]) return "good";
+    if (value <= t[1]) return "needs-improvement";
+    return "poor";
+  }
+  function recordVital(name, value) {
+    _vitals[name] = { value: value, rating: ratingFor(name, value), id: name + "-" + Date.now() };
+  }
+  function observeVitals() {
+    if (typeof PerformanceObserver !== "function") return;
+    // LCP — the last largest-contentful-paint entry is the final value.
+    try {
+      new PerformanceObserver(function (list) {
+        var entries = list.getEntries();
+        var last = entries[entries.length - 1];
+        if (last && last.startTime) recordVital("LCP", last.startTime);
+      }).observe({ type: "largest-contentful-paint", buffered: true });
+    } catch (_) {}
+    // CLS — sum of all unexpected layout shifts after page load.
+    try {
+      var cls = 0;
+      new PerformanceObserver(function (list) {
+        for (var i = 0; i < list.getEntries().length; i++) {
+          var e = list.getEntries()[i];
+          if (!e.hadRecentInput) cls += e.value;
+        }
+        recordVital("CLS", cls);
+      }).observe({ type: "layout-shift", buffered: true });
+    } catch (_) {}
+    // FCP — fires once when first-contentful-paint is observed.
+    try {
+      new PerformanceObserver(function (list) {
+        for (var i = 0; i < list.getEntries().length; i++) {
+          var e = list.getEntries()[i];
+          if (e.name === "first-contentful-paint") recordVital("FCP", e.startTime);
+        }
+      }).observe({ type: "paint", buffered: true });
+    } catch (_) {}
+  }
+  observeVitals();
+
+  function fireWebVitals() {
+    var names = Object.keys(_vitals);
+    if (!names.length) return;
+    var props = Object.assign({}, standardProps());
+    for (var i = 0; i < names.length; i++) {
+      var n = names[i];
+      var m = _vitals[n];
+      props["$web_vitals_" + n + "_value"] = m.value;
+      props["$web_vitals_" + n + "_event"] = { name: n, value: m.value, rating: m.rating, id: m.id };
+    }
+    sendEvent("$web_vitals", props, true);
+  }
+
+  // Best-effort $pageleave + $web_vitals on tab hide and on unload.
+  // visibilitychange is more reliable on mobile; pagehide covers Safari's
+  // back-forward cache. Both handlers are idempotent enough for duplicate
+  // fires not to matter — PostHog dedupes by `id` on the dashboard side.
+  function reportEndOfSession() {
+    fireWebVitals();
+    firePageleave();
+  }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden") firePageleave();
+    if (document.visibilityState === "hidden") reportEndOfSession();
   });
-  window.addEventListener("pagehide", firePageleave);
+  window.addEventListener("pagehide", reportEndOfSession);
 
   // ── Sentry (CDN snippet in index.html exposes window.Sentry) ────────────
   if (window.Sentry && typeof window.Sentry.init === "function" && !optedOut && isRealKey(SENTRY_DSN)) {
