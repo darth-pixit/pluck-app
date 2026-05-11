@@ -8,7 +8,7 @@ test.describe("Download modal", () => {
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ assets: [] }) }),
     );
     await page.route("**/script.google.com/**", (route) => route.fulfill({ status: 200, body: "ok" }));
-    await page.route("https://us.i.posthog.com/**", (route) =>
+    await page.route("https://e.pluks.app/**", (route) =>
       route.fulfill({ status: 200, body: "{}" }),
     );
     await page.route("https://*.ingest.sentry.io/**", (route) =>
