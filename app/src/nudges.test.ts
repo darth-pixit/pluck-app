@@ -6,37 +6,46 @@ beforeEach(() => {
 });
 
 describe("decideAffirmation()", () => {
-  it("fires for first 5 captures (every-1 tier)", () => {
-    for (let i = 1; i <= 5; i++) {
+  it("fires for first 20 captures (every-1 tier)", () => {
+    for (let i = 1; i <= 20; i++) {
       const d = decideAffirmation();
       expect(d.show).toBe(true);
       if (d.show) {
         expect(d.kind).toBe("affirmation");
-        expect(d.text).toBe("✦ Snagged");
+        expect(d.text).toBe("✦ Copied");
         expect(d.selects).toBe(i);
       }
     }
   });
 
-  it("decays to every-2 between 6 and 20", () => {
-    // First 5 are guaranteed.
-    for (let i = 0; i < 5; i++) decideAffirmation();
-    let shown = 0;
-    for (let i = 6; i <= 20; i++) {
-      if (decideAffirmation().show) shown++;
-    }
-    // (selects-1) % 2 === 0 fires for selects in {7, 9, 11, 13, 15, 17, 19} = 7
-    expect(shown).toBe(7);
-  });
-
-  it("decays to every-5 between 21 and 50", () => {
+  it("decays to every-3 between 21 and 50", () => {
     for (let i = 0; i < 20; i++) decideAffirmation();
     let shown = 0;
     for (let i = 21; i <= 50; i++) {
       if (decideAffirmation().show) shown++;
     }
-    // 21, 26, 31, 36, 41, 46 = 6 (every (selects-1) % 5 === 0)
-    expect(shown).toBe(6);
+    // (selects-1) % 3 === 0 fires for selects in {22, 25, 28, 31, 34, 37, 40, 43, 46, 49} = 10
+    expect(shown).toBe(10);
+  });
+
+  it("decays to every-10 between 51 and 100", () => {
+    for (let i = 0; i < 50; i++) decideAffirmation();
+    let shown = 0;
+    for (let i = 51; i <= 100; i++) {
+      if (decideAffirmation().show) shown++;
+    }
+    // (selects-1) % 10 === 0 fires for selects in {51, 61, 71, 81, 91} = 5
+    expect(shown).toBe(5);
+  });
+
+  it("decays to every-25 between 101 and 200", () => {
+    for (let i = 0; i < 100; i++) decideAffirmation();
+    let shown = 0;
+    for (let i = 101; i <= 200; i++) {
+      if (decideAffirmation().show) shown++;
+    }
+    // (selects-1) % 25 === 0 fires for selects in {101, 126, 151, 176} = 4
+    expect(shown).toBe(4);
   });
 
   it("stops firing after 200", () => {
@@ -47,22 +56,22 @@ describe("decideAffirmation()", () => {
   });
 
   it("increments selects counter regardless of show outcome", () => {
-    for (let i = 0; i < 7; i++) decideAffirmation();
-    expect(readStats().selects).toBe(7);
+    for (let i = 0; i < 22; i++) decideAffirmation();
+    expect(readStats().selects).toBe(22);
   });
 
   it("only increments affirmations counter on show", () => {
-    for (let i = 0; i < 5; i++) decideAffirmation();
-    expect(readStats().affirmationsShown).toBe(5);
-    decideAffirmation(); // selects=6, every-2 tier, (6-1)%2===1 -> skip
-    expect(readStats().affirmationsShown).toBe(5);
-    decideAffirmation(); // selects=7, (7-1)%2===0 -> show
-    expect(readStats().affirmationsShown).toBe(6);
+    for (let i = 0; i < 20; i++) decideAffirmation();
+    expect(readStats().affirmationsShown).toBe(20);
+    decideAffirmation(); // selects=21, every-3 tier, (21-1)%3===2 -> skip
+    expect(readStats().affirmationsShown).toBe(20);
+    decideAffirmation(); // selects=22, (22-1)%3===0 -> show
+    expect(readStats().affirmationsShown).toBe(21);
   });
 
   it("returns reason 'decay_skip' when in tier but skipped", () => {
-    for (let i = 0; i < 5; i++) decideAffirmation();
-    const d = decideAffirmation(); // selects=6 in every-2; (6-1)%2 != 0
+    for (let i = 0; i < 20; i++) decideAffirmation();
+    const d = decideAffirmation(); // selects=21 in every-3; (21-1)%3 != 0
     expect(d.show).toBe(false);
     if (!d.show) expect(d.reason).toBe("decay_skip");
   });
@@ -89,7 +98,7 @@ describe("decideCorrective()", () => {
     expect(d.show).toBe(true);
     if (d.show) {
       expect(d.kind).toBe("corrective");
-      expect(d.text).toBe("Already copied — no Cmd+C needed");
+      expect(d.text).toBe("✦ Already copied — just paste");
     }
   });
 

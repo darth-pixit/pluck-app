@@ -1,6 +1,6 @@
 /**
  * Adaptive nudge engine. Decides whether to show affirmation
- * ("✦ Snagged") and corrective ("Already copied") nudges based on
+ * ("✦ Copied") and corrective ("Already copied") nudges based on
  * the user's running adoption metrics.
  *
  * State lives in localStorage so it survives app relaunches but is
@@ -18,14 +18,14 @@ const KEY_AFFIRMATIONS = "pluks.nudges.affirmations_shown_total";
 const KEY_LAST_CORRECTIVE = "pluks.nudges.last_corrective_at";
 
 // Affirmation decay: how often to fire as `selects_total` grows.
-// Picked so a brand-new user gets steady reinforcement (every capture
-// for the first 5), then steadily fewer until ~5/sec at hour-1 of
-// usage feels like ambient sparkle, then nothing past 200 captures.
+// Every capture for the first 20 so the muscle memory has time to
+// form, then a gradual taper to ambient sparkle, then nothing past
+// 200 captures.
 const AFFIRMATION_TIERS: Array<{ until: number; everyN: number }> = [
-  { until: 5,   everyN: 1  },
-  { until: 20,  everyN: 2  },
-  { until: 50,  everyN: 5  },
-  { until: 200, everyN: 20 },
+  { until: 20,  everyN: 1  },
+  { until: 50,  everyN: 3  },
+  { until: 100, everyN: 10 },
+  { until: 200, everyN: 25 },
 ];
 
 // Corrective fires only once `selects_total` clears this — before that
@@ -81,19 +81,19 @@ export function readStats(): NudgeStats {
 
 /** Called on every successful Pluks capture (one per `new-selection` event). */
 export function decideAffirmation(): NudgeDecision {
-  // Increment first — the decision uses the post-increment count so the
-  // 5-tier "first 5" is genuinely the first 5 captures, not 0–4.
+  // Increment first — the decision uses the post-increment count so
+  // "first 20" is genuinely captures 1–20, not 0–19.
   const selects = read(KEY_SELECTS) + 1;
   write(KEY_SELECTS, selects);
 
   const tier = AFFIRMATION_TIERS.find(t => selects <= t.until);
   if (!tier) return { show: false, reason: "past_decay_horizon" };
   // every-Nth gating uses (selects - 1) so the first capture in a tier
-  // always fires (modulo == 0 for selects=1, 6, 21, etc).
+  // always fires (modulo == 0 for selects=1, 21, 51, 101).
   if (((selects - 1) % tier.everyN) !== 0) return { show: false, reason: "decay_skip" };
 
   write(KEY_AFFIRMATIONS, read(KEY_AFFIRMATIONS) + 1);
-  return { show: true, kind: "affirmation", text: "✦ Snagged", selects };
+  return { show: true, kind: "affirmation", text: "✦ Copied", selects };
 }
 
 /**
@@ -113,7 +113,7 @@ export function decideCorrective(): NudgeDecision {
   if (stats.lastCorrectiveAt > 0 && sinceLast < CORRECTIVE_COOLDOWN_MS) return { show: false, reason: "cooldown" };
 
   write(KEY_LAST_CORRECTIVE, Date.now());
-  return { show: true, kind: "corrective", text: "Already copied — no Cmd+C needed", selects: stats.selects };
+  return { show: true, kind: "corrective", text: "✦ Already copied — just paste", selects: stats.selects };
 }
 
 /** Test-only helper: wipe all nudge counters back to a clean slate. */
