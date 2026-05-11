@@ -248,6 +248,7 @@
     fix bugs and prioritize what to build next. Here's exactly what we do.
   </p>
   <ul class="privacy-bullets">
+    <li><strong>Password fields are skipped automatically.</strong> The desktop app checks macOS Accessibility before every capture — if focus is inside a secure text input (login, unlock prompt, password manager), Pluks never simulates a copy.</li>
     <li><strong>What we send:</strong> anonymous event counts (panel opens, history clicks, smart-paste use), error and crash stack traces, app/OS version, locale.</li>
     <li><strong>What we never send:</strong> the text you copy, the websites you visit, your name or email, anything that could identify you.</li>
     <li><strong>How to turn it off:</strong> desktop app → ⚙ Preferences → "Send anonymous usage stats". Website → respects Do Not Track.</li>

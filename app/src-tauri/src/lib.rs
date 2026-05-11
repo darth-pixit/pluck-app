@@ -4,7 +4,7 @@ mod settings;
 
 use history::{Database, HistoryItem};
 use selection::{
-    activate_pid, ax_is_trusted, cursor_pos, focus_is_editable, frontmost_pid,
+    activate_pid, ax_is_trusted, cursor_pos, focus_is_secure_field, frontmost_pid,
     input_monitoring_granted, read_clipboard, simulate_copy, simulate_paste, start_listener,
     write_clipboard, Clipboard, ManualCopySignal, SelectionSignal,
 };
@@ -427,13 +427,15 @@ fn start_copy_processor(
                 continue;
             }
 
-            // If the user is selecting inside an editable text field, treat
-            // it as a "replace" gesture — don't auto-copy. Otherwise we'd
-            // overwrite their clipboard with the destination text and pollute
-            // history. The detector returns false when AX can't classify the
-            // focus, so unsupported apps fall back to the prior behavior.
-            if focus_is_editable() {
-                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
+            // Only suppress capture for password fields. Previously we
+            // suppressed *all* editable focus on the theory that the user
+            // was about to paste-replace, but in practice that broke every
+            // common copy gesture inside a composer or terminal (WhatsApp,
+            // Terminal.app, IDE editors, search boxes). Users were left
+            // pasting an older clipboard value because the most recent
+            // selection never landed.
+            if focus_is_secure_field() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "secure_field");
                 continue;
             }
 
@@ -442,12 +444,12 @@ fn start_copy_processor(
 
             // Re-check just before firing Cmd+C: the panel may have appeared, the
             // user may have toggled auto-copy off, or focus may have moved into
-            // an editable target during the sleep.
+            // a password field during the sleep.
             if !state.watcher_enabled() || panel_visible(&app_handle) {
                 continue;
             }
-            if focus_is_editable() {
-                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "editable_focus");
+            if focus_is_secure_field() {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "secure_field");
                 continue;
             }
 

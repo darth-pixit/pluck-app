@@ -60,16 +60,21 @@ pub fn ax_is_trusted() -> bool { true }
 #[cfg(not(target_os = "macos"))]
 pub fn input_monitoring_granted() -> bool { true }
 
-// ── Editable-focus detection ──────────────────────────────────────────────────
+// ── Secure-field focus detection ──────────────────────────────────────────────
 //
-// When the user drags-to-select inside a text field they're working in, the
-// gesture is "replace what's here" — not "copy this." Auto-copying that
-// selection would overwrite the user's clipboard with the destination text
-// and pollute history. We query the focused UI element via Accessibility and
-// skip auto-copy if it's clearly an editable text role.
+// We previously suppressed auto-copy for *any* editable focus (text fields,
+// text areas, search boxes, terminal views) on the theory that the user was
+// about to paste-replace and we shouldn't clobber their clipboard. In
+// practice this misfired on every common copy gesture inside a composer or
+// terminal — users dragging to select 2–3 words in WhatsApp, copying output
+// from Terminal.app, etc. — and left them stuck pasting an older value.
+//
+// The narrowed check returns true only for `AXSecureTextField` (password
+// fields), where capturing the content would be a privacy violation. All
+// other editable fields fall through to the normal capture path.
 
 #[cfg(target_os = "macos")]
-pub fn focus_is_editable() -> bool {
+pub fn focus_is_secure_field() -> bool {
     use std::ffi::c_void;
     use std::ptr;
 
@@ -88,13 +93,6 @@ pub fn focus_is_editable() -> bool {
             element: AXUIElementRef,
             attribute: CFStringRef,
             value: *mut CFTypeRef,
-        ) -> AXError;
-        // CoreFoundation `Boolean` is `unsigned char`, not Rust `bool` —
-        // writing a non-{0,1} byte through `*mut bool` would be UB.
-        fn AXUIElementIsAttributeSettable(
-            element: AXUIElementRef,
-            attribute: CFStringRef,
-            settable: *mut u8,
         ) -> AXError;
         fn AXUIElementSetMessagingTimeout(
             element: AXUIElementRef,
@@ -139,11 +137,9 @@ pub fn focus_is_editable() -> bool {
     unsafe {
         let attr_focused = make_cfstr(b"AXFocusedUIElement");
         let attr_role = make_cfstr(b"AXRole");
-        let attr_value = make_cfstr(b"AXValue");
-        if attr_focused.is_null() || attr_role.is_null() || attr_value.is_null() {
+        if attr_focused.is_null() || attr_role.is_null() {
             if !attr_focused.is_null() { CFRelease(attr_focused); }
             if !attr_role.is_null() { CFRelease(attr_role); }
-            if !attr_value.is_null() { CFRelease(attr_value); }
             return false;
         }
 
@@ -151,7 +147,6 @@ pub fn focus_is_editable() -> bool {
         if system.is_null() {
             CFRelease(attr_focused);
             CFRelease(attr_role);
-            CFRelease(attr_value);
             return false;
         }
         // Cap each AX round-trip — an unresponsive target app must not stall
@@ -165,29 +160,17 @@ pub fn focus_is_editable() -> bool {
         if err != KAX_ERROR_SUCCESS || focused.is_null() {
             CFRelease(attr_focused);
             CFRelease(attr_role);
-            CFRelease(attr_value);
             return false;
         }
         let focused_el = focused as AXUIElementRef;
         AXUIElementSetMessagingTimeout(focused_el, 0.1);
 
-        // Strongest signal: the element advertises kAXValueAttribute as
-        // settable. That's only true for editable text-bearing roles.
-        let mut settable: u8 = 0;
-        let s_err = AXUIElementIsAttributeSettable(focused_el, attr_value, &mut settable);
-        if s_err == KAX_ERROR_SUCCESS && settable != 0 {
-            CFRelease(focused);
-            CFRelease(attr_focused);
-            CFRelease(attr_role);
-            CFRelease(attr_value);
-            return true;
-        }
-
-        // Fallback: match a known editable role string. Some webviews don't
-        // expose attribute-settability but do expose a role.
+        // Match the role exactly. AXSecureTextField is the only AX role
+        // assigned to password inputs (NSSecureTextField on macOS, the
+        // analogous WKWebView/CEF mapping for browsers, etc.).
         let mut role_ref: CFTypeRef = ptr::null();
         let r_err = AXUIElementCopyAttributeValue(focused_el, attr_role, &mut role_ref);
-        let editable = if r_err == KAX_ERROR_SUCCESS && !role_ref.is_null() {
+        let secure = if r_err == KAX_ERROR_SUCCESS && !role_ref.is_null() {
             let mut buf = [0u8; 64];
             let ok = CFStringGetCString(
                 role_ref as CFStringRef,
@@ -199,17 +182,7 @@ pub fn focus_is_editable() -> bool {
             if ok != 0 {
                 let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
                 let role = std::str::from_utf8(&buf[..nul]).unwrap_or("");
-                // AXSecureTextField included so we never auto-copy out of a
-                // password input — pre-existing privacy gap that this fix
-                // closes by reusing the same suppression path.
-                matches!(
-                    role,
-                    "AXTextField"
-                        | "AXTextArea"
-                        | "AXComboBox"
-                        | "AXSearchField"
-                        | "AXSecureTextField"
-                )
+                role == "AXSecureTextField"
             } else {
                 false
             }
@@ -220,16 +193,15 @@ pub fn focus_is_editable() -> bool {
         CFRelease(focused);
         CFRelease(attr_focused);
         CFRelease(attr_role);
-        CFRelease(attr_value);
-        editable
+        secure
     }
 }
 
-// Windows + Linux: no detector yet — return false so behavior is unchanged
-// from before this fix. The macOS path covers the primary platform; we can
-// add UIAutomation (Win) and AT-SPI (Linux) parity later.
+// Windows + Linux: no detector yet — return false so capture proceeds in all
+// focused fields, mirroring the relaxed macOS behavior post-narrowing. We can
+// add UIAutomation (Win) and AT-SPI (Linux) password-field detection later.
 #[cfg(not(target_os = "macos"))]
-pub fn focus_is_editable() -> bool { false }
+pub fn focus_is_secure_field() -> bool { false }
 
 // ── Target-app focus tracking ─────────────────────────────────────────────────
 

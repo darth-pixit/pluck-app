@@ -76,6 +76,12 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
             </span>
           </span>
         </label>
+
+        <p className="prefs-meta prefs-password-note">
+          <strong>Password fields are skipped automatically.</strong> When focus
+          is inside a secure text input (login, unlock prompt, password
+          manager), Pluks never simulates a copy and nothing lands in history.
+        </p>
       </section>
 
       <section className="prefs-section">

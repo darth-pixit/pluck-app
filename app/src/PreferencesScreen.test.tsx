@@ -66,6 +66,12 @@ describe("PreferencesScreen", () => {
     expect(screen.getByText(/Pluks v/)).toBeInTheDocument();
   });
 
+  it("surfaces the password-skip guarantee in the Privacy section", async () => {
+    await bootstrap();
+    render(<PreferencesScreen onClose={() => {}} />);
+    expect(screen.getByText(/Password fields are skipped automatically/i)).toBeInTheDocument();
+  });
+
   it("calls onClose handler exists (smoke)", async () => {
     await bootstrap();
     const onClose = vi.fn();

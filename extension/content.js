@@ -16,7 +16,7 @@
   // Many of the new triggers below (mouseup, keyup, select, selectionchange)
   // can fire for the same selection in quick succession. Dedupe within a short
   // window so a single user gesture lands a single history entry.
-  let lastCapture = { text: "", at: 0 };
+  let lastCapture = { text: "", at: 0, written: false };
   let selectionDebounce = null;
 
   // ── Toast UI ──────────────────────────────────────────────────────────────
@@ -212,19 +212,85 @@
     return { text: text, isFieldSelect: isFieldSelect };
   }
 
+  // Synchronous fallback for navigator.clipboard.writeText. Required because
+  // the async Clipboard API requires document.hasFocus() and an unexpired user
+  // activation — both of which pages like WhatsApp Web routinely invalidate
+  // between mouseup and the .then() callback (the in-page formatting popup
+  // shifts focus the instant a selection lands). execCommand('copy') is laxer
+  // and runs synchronously, so it tends to succeed when writeText doesn't.
+  function copyViaExecCommand(text) {
+    // Save the user's visible selection so the temp textarea below doesn't
+    // visibly clobber it for the duration of the copy.
+    let saved = [];
+    let activeRestore = null;
+    try {
+      const sel = window.getSelection();
+      if (sel) {
+        for (let i = 0; i < sel.rangeCount; i++) saved.push(sel.getRangeAt(i).cloneRange());
+      }
+      // INPUT/TEXTAREA selections aren't part of window.getSelection(); remember
+      // them via selectionStart/End on the focused element if applicable.
+      const ae = deepActiveElement();
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) {
+        try {
+          const s = ae.selectionStart, e = ae.selectionEnd, dir = ae.selectionDirection;
+          if (s != null && e != null) activeRestore = { el: ae, s: s, e: e, dir: dir };
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText =
+      "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.documentElement.appendChild(ta);
+    let ok = false;
+    try {
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      ok = document.execCommand("copy");
+    } catch (_) {}
+    ta.remove();
+
+    try {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        saved.forEach((r) => { try { sel.addRange(r); } catch (_) {} });
+      }
+      if (activeRestore) {
+        try {
+          activeRestore.el.focus();
+          activeRestore.el.setSelectionRange(activeRestore.s, activeRestore.e, activeRestore.dir);
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return ok;
+  }
+
   // Single funnel for every capture path (mouseup, keyup, select, selectionchange).
   // History is saved unconditionally; clipboard is best-effort. This is a change
   // from the original behaviour where clipboard failure silently dropped the
   // entry — the popup should always reflect what the user selected.
   function commitCapture(text, opts) {
     const now = Date.now();
-    if (text === lastCapture.text && now - lastCapture.at < 1500) return;
-    lastCapture = { text: text, at: now };
+    const isDup = (text === lastCapture.text && now - lastCapture.at < 1500);
+    // If the last write for this exact text already landed on the clipboard,
+    // a near-duplicate event is just noise — drop it. But if the previous
+    // write failed, let this duplicate event retry the clipboard write
+    // (without re-announcing it to history). This is the fix for the case
+    // where the first writeText silently rejects (page lost focus, e.g.
+    // WhatsApp Web's selection toolbar grabbing focus) and the user is then
+    // stuck pasting a stale clipboard value.
+    if (isDup && lastCapture.written) return;
 
-    try { chrome.runtime.sendMessage({ type: "SELECTION", text: text }); } catch (_) {}
+    if (!isDup) {
+      try { chrome.runtime.sendMessage({ type: "SELECTION", text: text }); } catch (_) {}
+    }
+    lastCapture = { text: text, at: now, written: false };
 
-    navigator.clipboard.writeText(text).then(() => {
-      showToast(text);
+    const trackSuccess = () => {
       try {
         if (window.Pluks) {
           window.Pluks.track("selection_captured", {
@@ -243,7 +309,21 @@
           }
         }
       } catch (_) {}
-    }).catch((err) => {
+    };
+
+    const onWritten = () => {
+      if (lastCapture.text === text) lastCapture.written = true;
+      showToast(text);
+      trackSuccess();
+    };
+
+    navigator.clipboard.writeText(text).then(onWritten).catch((err) => {
+      // Synchronous fallback before reporting failure. Works even when the
+      // async API rejects because focus moved away in the meantime.
+      if (copyViaExecCommand(text)) {
+        onWritten();
+        return;
+      }
       try {
         if (window.Pluks) {
           var reason = "unknown";

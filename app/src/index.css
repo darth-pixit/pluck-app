@@ -720,7 +720,33 @@ body.nudge-body {
   line-height: 1.5;
   opacity: 0.85;
 }
+.setup-privacy-note + .setup-privacy-note {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
 .setup-privacy-note strong { color: var(--text); font-weight: 600; }
+
+.prefs-password-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-left: 2px solid var(--accent-2);
+  border-radius: 4px;
+  line-height: 1.55;
+}
+.prefs-password-note strong { color: var(--text); }
+
+.tour-footnote {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+  opacity: 0.8;
+}
 
 /* ── Preferences screen ────────────────────────────────────────────── */
 .prefs-screen {
