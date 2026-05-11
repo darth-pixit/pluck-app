@@ -5,14 +5,14 @@ import { track } from "./analytics";
 /**
  * Post-permission activation tour. Runs once after the user grants AX +
  * Input Monitoring; exists to get them through the actual product loop
- * (select → snagged → paste → repeat → ⌘⇧V) before they're left alone
+ * (select → copied → paste → repeat → ⌘⇧V) before they're left alone
  * with an empty panel. Each step gates on a real gesture, not just a
  * Next click — that's the whole point.
  */
 
 const SHORTCUT_HINT = navigator.userAgent.includes("Mac") ? "⌘⇧V" : "Ctrl+Shift+V";
 
-const SAMPLE_1 = "Pluks just snagged this sentence the moment you highlighted it.";
+const SAMPLE_1 = "Pluks just copied this sentence the moment you highlighted it.";
 const SAMPLE_2 = "Highlight me too — I'll stack on top of the first one.";
 
 type StepKind = "select-1" | "paste" | "select-2" | "shortcut";
@@ -26,7 +26,7 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
   "select-1": {
     title: "Try it — select the text below",
     body: "Drag across a few words. No Cmd+C, no right-click. Pluks grabs it the second you let go.",
-    success: "✦ Snagged. It's already on your clipboard.",
+    success: "✦ Copied. It's already on your clipboard.",
     nextLabel: "Next →",
   },
   paste: {
@@ -102,7 +102,7 @@ export default function ActivationTour({ onDone }: Props) {
       } catch { return; }
       // Pluks's own auto-copy listener won't fire while the panel is
       // visible, so we write to the clipboard ourselves to keep the
-      // "snagged" promise true for step 2's paste.
+      // "copied" promise true for step 2's paste.
       try { navigator.clipboard.writeText(text).catch(() => {}); } catch { /* ignore */ }
       setHit(prev => prev[cur] ? prev : { ...prev, [cur]: true });
     }

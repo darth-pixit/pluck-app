@@ -117,7 +117,7 @@ test files is the source of truth — this annotation is a navigation aid.
 - **Steps:** Drag-select text in any AX-enabled app (Safari, TextEdit).
 - **Expect:**
   - Selected text lands in system clipboard (Cmd+V pastes it).
-  - Affirmation nudge "✦ Snagged" shows briefly near cursor.
+  - Affirmation nudge "✦ Copied" shows briefly near cursor.
   - Open panel → first item == selected text.
 
 ### A2.2 Double-click word copies [MUST PASS]
@@ -360,14 +360,14 @@ correct **badge** + the listed **action buttons** appear → click each action
 
 ## A7. Nudges (adaptive)
 
-### A7.1 Affirmation fires for first 5 captures [MUST PASS]
+### A7.1 Affirmation fires for first 20 captures [MUST PASS]
 - **Pre:** Reset nudge stats (or fresh install).
-- **Steps:** Capture 5 distinct selections in <1 min.
-- **Expect:** "✦ Snagged" pill appears for each.
+- **Steps:** Capture 20 distinct selections in <1 min.
+- **Expect:** "✦ Copied" pill appears for each.
 
 ### A7.2 Affirmation decays per tier [SHOULD PASS]
-- **Steps:** Continue capturing past 5 → 20 → 50 → 200.
-- **Expect:** Nudge frequency drops to every-2 → every-5 → every-20 → none.
+- **Steps:** Continue capturing past 20 → 50 → 100 → 200.
+- **Expect:** Nudge frequency drops to every-3 → every-10 → every-25 → none.
 
 ### A7.3 Nudge auto-dismisses ~1.1s [SHOULD PASS]
 - **Expect:** Pill is visible briefly, fades; never persists.
