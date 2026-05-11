@@ -39,8 +39,15 @@ describe("App routing", () => {
     setInvokeHandler(permissionHandler({ ax: false, im: false }));
     render(<App />);
     expect(await screen.findByText(/Two quick permissions/)).toBeInTheDocument();
-    expect(screen.getByText(/Accessibility/)).toBeInTheDocument();
-    expect(screen.getByText(/Input Monitoring/)).toBeInTheDocument();
+    // Scope the role-existence assertions to the .step-title elements so the
+    // word "Accessibility" appearing elsewhere on the screen (e.g. in the
+    // password-skip privacy note) doesn't trip getByText's uniqueness check.
+    const titles = screen.getAllByText((_, el) =>
+      el?.classList.contains("step-title") ?? false,
+    );
+    expect(titles.map(t => t.textContent)).toEqual(
+      expect.arrayContaining(["Accessibility", "Input Monitoring"]),
+    );
   });
 
   it("after both perms granted with activation seen, shows the main panel", async () => {
