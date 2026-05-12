@@ -36,7 +36,12 @@ jobs:
   app-rust:
     name: App Rust (cargo test)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Tauri's dep graph is heavy — a cold-cache rebuild on a 2-core runner
+    # routinely takes 20+ minutes (any Cargo.lock change invalidates the
+    # rust-cache key, e.g. a `chore: bump` commit). 25 m hit timeout for
+    # the v0.4.1 bump merge; bumped to 40 m so cold-cache cases complete
+    # rather than terminate the run and starve subsequent cache writes.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: app/src-tauri
