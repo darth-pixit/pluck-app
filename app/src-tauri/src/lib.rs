@@ -1,4 +1,5 @@
 mod history;
+mod paste;
 mod selection;
 mod settings;
 
@@ -6,7 +7,7 @@ use history::{Database, HistoryItem};
 use selection::{
     activate_pid, ax_is_trusted, cursor_pos, focus_is_secure_field, frontmost_pid,
     input_monitoring_granted, read_clipboard, simulate_copy, simulate_paste, start_listener,
-    write_clipboard, Clipboard, ManualCopySignal, SelectionSignal,
+    write_clipboard, Clipboard, ManualCopySignal, MouseEvent, SelectionSignal,
 };
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,7 +22,7 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime, State, WebviewWindow,
 };
 
-const WIN_HISTORY: &str = "history";
+pub(crate) const WIN_HISTORY: &str = "history";
 const WIN_NUDGE: &str = "nudge";
 const EVT_NEW_SELECTION: &str = "new-selection";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
@@ -634,6 +635,16 @@ pub fn run() {
                 let _ = win.set_ignore_cursor_events(true);
             }
 
+            // Configure the radial paste window. Same overlay treatment
+            // (floats over Spaces, never activates) and also click-through:
+            // the in-flight mouse-down belongs to the underlying app, and
+            // all radial input is driven by `paste.rs` reading the global
+            // event tap directly — the window is a pure visual surface.
+            if let Some(win) = app.get_webview_window(paste::WIN_RADIAL) {
+                configure_overlay_window(&win);
+                let _ = win.set_ignore_cursor_events(true);
+            }
+
             let db_path = app.path().app_data_dir().expect("no app data dir").join("pluck.db");
             let db = Database::new(db_path).expect("failed to open database");
             let state = Arc::new(AppState {
@@ -761,9 +772,15 @@ pub fn run() {
             // Cmd+C four times shouldn't lose the analytics signal, but we
             // still want backpressure if something stalls.
             let (tx_manual, rx_manual) = mpsc::sync_channel::<ManualCopySignal>(4);
-            start_listener(tx, tx_manual, state.paste_seq.clone());
+            // Raw mouse stream for the long-press detector in `paste.rs`. Sized
+            // generously: a fast drag may emit dozens of Move events per
+            // second, and we'd rather drop a few during a stall than block the
+            // OS event tap thread.
+            let (tx_mouse, rx_mouse) = mpsc::sync_channel::<MouseEvent>(64);
+            start_listener(tx, tx_manual, tx_mouse, state.paste_seq.clone());
             start_copy_processor(rx, state.clone(), app.handle().clone());
-            start_manual_copy_processor(rx_manual, state, app.handle().clone());
+            start_manual_copy_processor(rx_manual, state.clone(), app.handle().clone());
+            paste::start_paste_processor(rx_mouse, state, app.handle().clone());
 
             Ok(())
         })
@@ -779,13 +796,14 @@ pub fn run() {
             open_input_monitoring_settings,
             invoke_paste,
             show_nudge,
+            paste::radial_dismiss,
             settings::get_settings,
             settings::set_settings,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
-                if label == WIN_HISTORY || label == WIN_NUDGE {
+                if label == WIN_HISTORY || label == WIN_NUDGE || label == paste::WIN_RADIAL {
                     api.prevent_close();
                     let _ = window.hide();
                 }

@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getSettings, resetAnonymousId, setCrashOptOut, setOptOut, type Settings } from "./analytics";
+import {
+  getSettings,
+  resetAnonymousId,
+  setCrashOptOut,
+  setLongPressEnabled,
+  setOptOut,
+  type Settings,
+} from "./analytics";
 
 interface Props {
   onClose: () => void;
@@ -34,6 +41,12 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
     setSettings({ ...settings, crash_opt_out: !enabled });
   };
 
+  const onToggleLongPress = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = e.target.checked;
+    await setLongPressEnabled(enabled);
+    setSettings({ ...settings, enable_long_press_paste: enabled });
+  };
+
   const onResetId = async () => {
     setResetting(true);
     await resetAnonymousId();
@@ -45,6 +58,25 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
   return (
     <div className="prefs-screen">
       <h2 className="prefs-title">Preferences</h2>
+
+      <section className="prefs-section">
+        <h3 className="prefs-section-title">Gestures</h3>
+
+        <label className="prefs-toggle">
+          <input
+            type="checkbox"
+            checked={settings.enable_long_press_paste}
+            onChange={onToggleLongPress}
+          />
+          <span className="prefs-toggle-label">
+            <strong>Press-and-hold to paste</strong>
+            <span className="prefs-toggle-hint">
+              Hold the mouse for half a second anywhere to open a wheel of
+              recent clips. Drag to one, let go to paste.
+            </span>
+          </span>
+        </label>
+      </section>
 
       <section className="prefs-section">
         <h3 className="prefs-section-title">Privacy &amp; data</h3>

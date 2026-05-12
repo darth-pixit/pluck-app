@@ -67,9 +67,25 @@ const SCHEMA: Record<string, readonly string[]> = {
   // Adaptive muscle-memory nudges (#4). `nudge_shown` fires when an
   // affirmation/corrective is actually displayed; `nudge_suppressed`
   // when the decay/throttle logic decides not to. `kind` is the
-  // category, `reason` is the suppression cause for tuning.
+  // category, `reason` is the suppression cause for tuning. The
+  // bucket field captures the relevant running count: selections for
+  // the copy-side affirmation, holds for the paste-side affirmation.
   nudge_shown:                   ["kind", "selects_total_bucket"],
   nudge_suppressed:              ["kind", "reason"],
+
+  // Long-press radial paste menu. `radial_shown` fires once per fire
+  // (after every gate has cleared and the wheel is on-screen).
+  // `radial_committed` fires when the user releases on a valid slice
+  // and we successfully simulate paste into the target app.
+  // `radial_cancelled` covers every non-paste exit (release in the
+  // dead-zone, release outside the outer ring, clipboard write failure).
+  // `radial_suppressed` covers the gate-fail paths from `paste.rs`:
+  // disabled, panel_visible, secure_field, empty_history, no_window.
+  radial_shown:                  ["items_count_bucket"],
+  radial_committed:              ["slice_index", "char_count_bucket", "kind"],
+  radial_cancelled:              ["reason"],
+  radial_suppressed:             ["reason"],
+  long_press_paste_toggled:      ["enabled"],
 
   history_loaded:                ["item_count", "load_ms"],
   history_item_clicked:          ["position", "kind", "char_count_bucket"],
@@ -101,6 +117,7 @@ export interface Settings {
   crash_opt_out: boolean;
   analytics_first_seen_version: string;
   last_seen_version: string;
+  enable_long_press_paste: boolean;
 }
 
 let _settings: Settings | null = null;
@@ -187,7 +204,8 @@ export async function initAnalytics(): Promise<void> {
       opt_out: false,
       crash_opt_out: false,
       analytics_first_seen_version: APP_VERSION,
-      last_seen_version: APP_VERSION
+      last_seen_version: APP_VERSION,
+      enable_long_press_paste: true,
     };
   }
 
@@ -296,6 +314,14 @@ export async function setCrashOptOut(optOut: boolean): Promise<void> {
   if (optOut && !_settings.crash_opt_out) track("crash_report_opted_out", {});
   _settings.crash_opt_out = optOut;
   if (!optOut) track("crash_report_opted_in", {});
+  try { await invoke("set_settings", { settings: _settings }); } catch {}
+}
+
+export async function setLongPressEnabled(enabled: boolean): Promise<void> {
+  if (!_settings) return;
+  if (_settings.enable_long_press_paste === enabled) return;
+  _settings.enable_long_press_paste = enabled;
+  track("long_press_paste_toggled", { enabled });
   try { await invoke("set_settings", { settings: _settings }); } catch {}
 }
 
