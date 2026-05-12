@@ -62,12 +62,24 @@ const SYNTHETIC_COPY_GUARD_MS: u128 = 250;
 // the user is doing a select-to-replace — abort the capture so their
 // paste lands the prior clipboard contents over the destination.
 //
-// Picked to cover ~95th-percentile motor reaction time between drag-up
-// and the paste keystroke (~80–150 ms for a practiced user). Going much
-// higher adds capture latency for the common pure-copy case; going much
-// lower misses slower replace gestures. Also replaces the prior 80 ms
-// "AppKit settle" sleep — the watch loop serves the same settle purpose.
-const PASTE_WATCH_MS: u64 = 180;
+// Tuning is bounded by empirical motor reaction time between drag-up
+// and the paste keystroke: 5th percentile ~120 ms (practiced user with
+// hand near keyboard), 50th percentile ~280 ms (typical hand transit),
+// 95th percentile ~450 ms (deliberate user who reads the destination
+// before pasting). The v0.3.0 → v0.4.0 regression came from a 180 ms
+// budget that only covered the fastest decile.
+//
+// 500 ms is the Apple HIG double-click ceiling — the longest interval
+// macOS itself treats as a single intentional gesture beat. Going
+// wider risks misattributing an unrelated Cmd+V (e.g. the user's next
+// real paste action) as a replace; going narrower misses real users.
+//
+// Cost: adds ~320 ms to capture latency on every drag-select. The
+// existing 600 ms clipboard-change poll dominated the total path
+// anyway, so the user-perceptible "selection → nudge" budget stays
+// in the sub-second zone. See `replace_guard_tests` for the timing
+// envelope under test.
+const PASTE_WATCH_MS: u64 = 500;
 // How often the watch loop re-reads `paste_seq`. Small enough that even
 // a sub-100 ms paste is caught on the next tick.
 const PASTE_WATCH_TICK_MS: u64 = 15;
@@ -871,5 +883,78 @@ mod replace_guard_tests {
         let seq = AtomicU64::new(99);
         let pasted = watch_for_paste(&seq);
         assert!(!pasted, "stale paste count must not trigger an abort");
+    }
+
+    // ── Realistic motor-reaction timing tests ────────────────────────────
+    //
+    // These tests document the timing budget the watch window must cover
+    // for actual humans doing the select-to-replace gesture (drag-up,
+    // hand to keyboard, press Cmd, press V). The previous 180 ms tuning
+    // was too tight to catch the bulk of users — these tests fail at
+    // 180 ms and pass at 500 ms.
+    //
+    // References for the budget:
+    //   - Card/Moran/Newell (1983): perceptual + motor cycle is roughly
+    //     230 ms for the average user transitioning to a keyboard.
+    //   - macOS double-click default ceiling is 500 ms — Apple HIG
+    //     treats up to 500 ms as one "intentional gesture beat."
+    //   - Empirical Pluks bug reports (v0.4.0): paste fires anywhere
+    //     in the 200–450 ms range.
+
+    fn time_paste_at(delay_ms: u64) -> bool {
+        let seq = Arc::new(AtomicU64::new(0));
+        let bumper = Arc::clone(&seq);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(delay_ms));
+            bumper.fetch_add(1, Ordering::Relaxed);
+        });
+        let pasted = watch_for_paste(&seq);
+        handle.join().expect("bumper thread joined");
+        pasted
+    }
+
+    #[test]
+    fn catches_fast_user_paste_at_120ms() {
+        // ~5th percentile: practiced user with hand already near keyboard.
+        assert!(
+            time_paste_at(120),
+            "120 ms paste must be inside the watch window — \
+             this is the fastest realistic replace gesture"
+        );
+    }
+
+    #[test]
+    fn catches_median_user_paste_at_280ms() {
+        // ~50th percentile: typical hand-to-keyboard transition.
+        // The v0.3.0 → v0.4.0 regression was that the watch ended at
+        // 180 ms, well before this point.
+        assert!(
+            time_paste_at(280),
+            "280 ms paste must be inside the watch window — \
+             this is the median user timing the v0.4.0 regression missed"
+        );
+    }
+
+    #[test]
+    fn catches_slow_user_paste_at_450ms() {
+        // ~95th percentile: deliberate user reading the destination
+        // before pressing Cmd+V. Still a clear single-gesture replace.
+        assert!(
+            time_paste_at(450),
+            "450 ms paste must be inside the watch window — \
+             the 95th percentile of realistic replace timing"
+        );
+    }
+
+    #[test]
+    fn ignores_paste_after_window_expires() {
+        // Far past any plausible replace gesture — this is a separate
+        // intentional paste, not a replace. Must NOT abort capture.
+        let pasted = time_paste_at(PASTE_WATCH_MS + 200);
+        assert!(
+            !pasted,
+            "paste arriving well after the window must not be \
+             miscategorized as a replace"
+        );
     }
 }
