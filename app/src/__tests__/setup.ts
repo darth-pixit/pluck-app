@@ -80,17 +80,6 @@ vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("posthog-js", () => ({
-  default: {
-    init: vi.fn(),
-    capture: vi.fn(),
-    identify: vi.fn(),
-    reset: vi.fn(),
-    opt_in_capturing: vi.fn(),
-    opt_out_capturing: vi.fn(),
-  },
-}));
-
 vi.mock("@sentry/react", () => ({
   init: vi.fn(),
   captureException: vi.fn(),

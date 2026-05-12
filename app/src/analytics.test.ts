@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import posthog from "posthog-js";
 import {
   bucket,
   captureException,
@@ -13,14 +12,10 @@ import {
 } from "./analytics";
 import { setInvokeHandler } from "./__tests__/setup";
 
-const mockedPosthog = posthog as unknown as {
-  capture: ReturnType<typeof vi.fn>;
-  init: ReturnType<typeof vi.fn>;
-  opt_in_capturing: ReturnType<typeof vi.fn>;
-  opt_out_capturing: ReturnType<typeof vi.fn>;
-  reset: ReturnType<typeof vi.fn>;
-  identify: ReturnType<typeof vi.fn>;
-};
+// Spy on the bare fetch the analytics module uses to ship events. We replace
+// it with a vi.fn() so individual tests can assert on calls / count them.
+const fetchMock = vi.fn(() => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("{}") } as unknown as Response));
+vi.stubGlobal("fetch", fetchMock);
 
 describe("bucket()", () => {
   it.each([
@@ -78,14 +73,12 @@ describe("settings & opt-out flow", () => {
     });
   });
 
-  it("setOptOut updates settings and toggles posthog", async () => {
+  it("setOptOut updates settings", async () => {
     await initAnalytics();
     await setOptOut(true);
     expect(getSettings()!.opt_out).toBe(true);
-    expect(mockedPosthog.opt_out_capturing).toHaveBeenCalled();
     await setOptOut(false);
     expect(getSettings()!.opt_out).toBe(false);
-    expect(mockedPosthog.opt_in_capturing).toHaveBeenCalled();
   });
 
   it("setCrashOptOut updates settings", async () => {
@@ -96,14 +89,12 @@ describe("settings & opt-out flow", () => {
     expect(getSettings()!.crash_opt_out).toBe(false);
   });
 
-  it("resetAnonymousId rotates id and re-identifies posthog", async () => {
+  it("resetAnonymousId rotates the id", async () => {
     await initAnalytics();
     const before = getSettings()!.anon_id;
     await resetAnonymousId();
     const after = getSettings()!.anon_id;
     expect(after).not.toBe(before);
-    expect(mockedPosthog.reset).toHaveBeenCalled();
-    expect(mockedPosthog.identify).toHaveBeenCalledWith(after);
   });
 });
 
@@ -123,12 +114,12 @@ describe("safeInvoke()", () => {
 });
 
 describe("track() under placeholder key", () => {
-  it("never reaches posthog.capture when key is the test placeholder", async () => {
+  it("never reaches fetch when key is the test placeholder", async () => {
     await initAnalytics();
-    mockedPosthog.capture.mockClear();
+    fetchMock.mockClear();
     track("history_loaded", { item_count: 7, load_ms: 12 });
-    // Placeholder-key path short-circuits, so capture is never called.
-    expect(mockedPosthog.capture).not.toHaveBeenCalled();
+    // Placeholder-key path short-circuits, so no network request is made.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
