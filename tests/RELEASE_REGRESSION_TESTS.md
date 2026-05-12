@@ -13,7 +13,7 @@ A large fraction of the cases below run automatically on every push and PR via
 | Suite | Runner | Coverage |
 | ----- | ------ | -------- |
 | `app/` vitest + RTL | `cd app && npm test` | A2 (capture logic via mocks), A3-A6 panel + history + smart-paste, A7 nudge engine, A8 prefs, A9 updater notice, A12 activation flag, A13 analytics whitelist/scrub |
-| `app/src-tauri` cargo test | `cd app/src-tauri && cargo test --lib` | A12 SQLite history (insert, dedup, cap, delete, clear, persist), settings (load/save/corrupt recovery, UUID shape) |
+| `app/src-tauri` cargo test | `cd app/src-tauri && cargo test --lib` | A12 SQLite history (insert, dedup, cap, delete, clear, persist), settings (load/save/corrupt recovery, UUID shape), A2.4c paste-watch (aborts on imminent Cmd+V, expires cleanly on quiet drag, ignores stale paste count) |
 | `extension/` Playwright | `cd extension && npx playwright test` | B2 content-script auto-copy + toast, B3 storage dedup + cap, B4 popup search + click + clear + opt-out |
 | `website/` Playwright | `cd website && npx playwright test` | C1 render + privacy, C2 demo toast, C3 download modal validation + lead persistence + close paths |
 
@@ -130,15 +130,34 @@ test files is the source of truth — this annotation is a navigation aid.
 
 ### A2.4 Selection inside editable field IS captured [MUST PASS]
 - **Pre:** Focus inside an editable text field (TextEdit document, Notes app,
-  WhatsApp composer, Terminal.app text view).
-- **Steps:** Drag-select 2–3 words within that field.
+  WhatsApp composer, Terminal.app text view). No Cmd+V follows within ~180 ms.
+- **Steps:** Drag-select 2–3 words within that field, then pause (don't
+  paste).
 - **Expect:**
-  - Text **is** captured to history.
+  - Text **is** captured to history (after the ~180 ms paste-watch window).
   - Clipboard **is** overwritten with the selection.
   - No `capture-suppressed` event emitted.
-- **Note:** The select-to-replace-before-paste flow is intentionally broken
-  by this — Cmd+V after select will paste the just-selected text, not the
-  prior clipboard. Delete-then-paste is the supported replace pattern.
+
+### A2.4c Select-to-replace lands prior clipboard [MUST PASS]
+- **Pre:** Capture "alpha" from a non-editable area (Safari page text).
+  Focus TextEdit and type "bravo".
+- **Steps:** Drag-select "bravo" and press Cmd+V within ~150 ms.
+- **Expect:**
+  - "alpha" replaces "bravo" in the document.
+  - No `selection_captured` event for "bravo".
+  - One `selection_capture_failed` event with `reason="paste_within_window"`.
+  - History still has "alpha" as the top row (not "bravo").
+
+### A2.4d Slow replace falls back to no-op [SHOULD PASS]
+- **Pre:** Same setup as A2.4c.
+- **Steps:** Drag-select "bravo", wait ≥400 ms, then press Cmd+V.
+- **Expect:**
+  - "bravo" remains in the document (the just-captured clipboard pastes
+    back over itself — visual no-op).
+  - `selection_captured` fires for "bravo"; it's now the top history row.
+  - This is the documented trade-off — users who out-wait the
+    `PASTE_WATCH_MS` window lose the replace flow but never get
+    wrong-paste; they can recover the prior value from the panel.
 
 ### A2.4b Selection inside password field is suppressed [MUST PASS]
 - **Pre:** Focus inside an `AXSecureTextField` (Safari password input, the

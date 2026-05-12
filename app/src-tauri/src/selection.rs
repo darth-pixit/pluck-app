@@ -1,4 +1,5 @@
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -500,6 +501,11 @@ mod mac_tap {
     struct Ctx {
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        /// Bumped on every observed Cmd+V (Ctrl+V on non-mac, handled in
+        /// rdev_listener). The copy processor polls this between a drag-up
+        /// and its synthetic Cmd+C, and bails if it advances — that's the
+        /// signal the user is doing a select-to-replace, not a copy.
+        paste_seq: Arc<AtomicU64>,
         press_x: f64,
         press_y: f64,
         button_down: bool,
@@ -567,6 +573,14 @@ mod mac_tap {
                 if kc as u16 == KEYCODE_C && flags == FLAG_CMD {
                     let _ = ctx.tx_manual.try_send(ManualCopySignal);
                 }
+                // Cmd+V — flags the in-flight selection (if any) as a
+                // replace gesture so the copy processor doesn't clobber
+                // the clipboard right before the user pastes into the
+                // selection they just made. Cmd+Shift+V (panel toggle)
+                // carries FLAG_SHIFT and is excluded by the exact match.
+                if kc as u16 == KEYCODE_V && flags == FLAG_CMD {
+                    ctx.paste_seq.fetch_add(1, Ordering::Relaxed);
+                }
             }
             _ => {}
         }
@@ -576,6 +590,7 @@ mod mac_tap {
     pub fn run(
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        paste_seq: Arc<AtomicU64>,
     ) {
         let mask: u64 = (1u64 << K_CG_EVENT_LEFT_MOUSE_DOWN)
             | (1u64 << K_CG_EVENT_LEFT_MOUSE_UP)
@@ -584,6 +599,7 @@ mod mac_tap {
         let ctx = Box::into_raw(Box::new(Ctx {
             tx,
             tx_manual,
+            paste_seq,
             press_x: 0.0,
             press_y: 0.0,
             button_down: false,
@@ -637,6 +653,7 @@ mod rdev_listener {
     pub fn run(
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        paste_seq: Arc<AtomicU64>,
     ) {
         let mut press_x = 0.0_f64;
         let mut press_y = 0.0_f64;
@@ -692,6 +709,13 @@ mod rdev_listener {
                         let _ = tx_manual.try_send(ManualCopySignal);
                     }
                 }
+                Key::KeyV => {
+                    // Mirrors the macOS Cmd+V detection. Ctrl+Shift+V
+                    // (panel toggle) is excluded by the !shift guard.
+                    if ctrl && !shift && !alt && !meta {
+                        paste_seq.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 _ => {}
             },
             EventType::KeyRelease(k) => match k {
@@ -713,6 +737,7 @@ mod rdev_listener {
 pub fn start_listener(
     tx: mpsc::SyncSender<SelectionSignal>,
     tx_manual: mpsc::SyncSender<ManualCopySignal>,
+    paste_seq: Arc<AtomicU64>,
 ) {
     thread::spawn(move || {
         loop {
@@ -723,10 +748,10 @@ pub fn start_listener(
         dlog!("[pluks] Permissions confirmed — starting listener.");
 
         #[cfg(target_os = "macos")]
-        mac_tap::run(tx, tx_manual);
+        mac_tap::run(tx, tx_manual, paste_seq);
 
         #[cfg(not(target_os = "macos"))]
-        rdev_listener::run(tx, tx_manual);
+        rdev_listener::run(tx, tx_manual, paste_seq);
     });
 }
 
