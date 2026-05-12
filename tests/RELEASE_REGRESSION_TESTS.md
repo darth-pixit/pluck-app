@@ -13,7 +13,7 @@ A large fraction of the cases below run automatically on every push and PR via
 | Suite | Runner | Coverage |
 | ----- | ------ | -------- |
 | `app/` vitest + RTL | `cd app && npm test` | A2 (capture logic via mocks), A3-A6 panel + history + smart-paste, A7 nudge engine, A8 prefs, A9 updater notice, A12 activation flag, A13 analytics whitelist/scrub |
-| `app/src-tauri` cargo test | `cd app/src-tauri && cargo test --lib` | A12 SQLite history (insert, dedup, cap, delete, clear, persist), settings (load/save/corrupt recovery, UUID shape), A2.4c paste-watch (aborts on imminent Cmd+V, expires cleanly on quiet drag, ignores stale paste count) |
+| `app/src-tauri` cargo test | `cd app/src-tauri && cargo test --lib` | A12 SQLite history (insert, dedup, cap, delete, clear, persist), settings (load/save/corrupt recovery, UUID shape), A2.4c paste-watch (aborts on imminent Cmd+V, expires cleanly on quiet drag, ignores stale paste count, **covers 120/280/450 ms realistic motor-reaction timings**) |
 | `extension/` Playwright | `cd extension && npx playwright test` | B2 content-script auto-copy + toast, B3 storage dedup + cap, B4 popup search + click + clear + opt-out |
 | `website/` Playwright | `cd website && npx playwright test` | C1 render + privacy, C2 demo toast, C3 download modal validation + lead persistence + close paths |
 
@@ -130,27 +130,32 @@ test files is the source of truth — this annotation is a navigation aid.
 
 ### A2.4 Selection inside editable field IS captured [MUST PASS]
 - **Pre:** Focus inside an editable text field (TextEdit document, Notes app,
-  WhatsApp composer, Terminal.app text view). No Cmd+V follows within ~180 ms.
+  WhatsApp composer, Terminal.app text view). No Cmd+V follows within ~500 ms.
 - **Steps:** Drag-select 2–3 words within that field, then pause (don't
   paste).
 - **Expect:**
-  - Text **is** captured to history (after the ~180 ms paste-watch window).
+  - Text **is** captured to history (after the ~500 ms paste-watch window).
   - Clipboard **is** overwritten with the selection.
   - No `capture-suppressed` event emitted.
 
 ### A2.4c Select-to-replace lands prior clipboard [MUST PASS]
 - **Pre:** Capture "alpha" from a non-editable area (Safari page text).
   Focus TextEdit and type "bravo".
-- **Steps:** Drag-select "bravo" and press Cmd+V within ~150 ms.
+- **Steps:** Drag-select "bravo" and press Cmd+V at any natural speed
+  (the watch window spans up to ~500 ms — covers the 5th–95th percentile
+  of motor-reaction time, ~120 ms to ~450 ms).
 - **Expect:**
   - "alpha" replaces "bravo" in the document.
   - No `selection_captured` event for "bravo".
   - One `selection_capture_failed` event with `reason="paste_within_window"`.
   - History still has "alpha" as the top row (not "bravo").
+- **History note:** v0.3.0 first wired the watch at 180 ms; v0.4.0
+  inherited that, but real users press Cmd+V at 200–450 ms post-drag.
+  v0.4.x widens the window to the Apple HIG 500 ms gesture-beat ceiling.
 
 ### A2.4d Slow replace falls back to no-op [SHOULD PASS]
 - **Pre:** Same setup as A2.4c.
-- **Steps:** Drag-select "bravo", wait ≥400 ms, then press Cmd+V.
+- **Steps:** Drag-select "bravo", wait ≥700 ms, then press Cmd+V.
 - **Expect:**
   - "bravo" remains in the document (the just-captured clipboard pastes
     back over itself — visual no-op).
