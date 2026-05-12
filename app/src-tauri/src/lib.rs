@@ -57,6 +57,21 @@ const MANUAL_COPY_WINDOW_MS: u128 = 5_000;
 // ~150 ms of `last_synthetic_copy_at`. 250 ms is conservative.
 const SYNTHETIC_COPY_GUARD_MS: u128 = 250;
 
+// After a drag-select we wait this long watching for a Cmd+V keystroke
+// before firing our synthetic Cmd+C. If Cmd+V arrives during the window,
+// the user is doing a select-to-replace — abort the capture so their
+// paste lands the prior clipboard contents over the destination.
+//
+// Picked to cover ~95th-percentile motor reaction time between drag-up
+// and the paste keystroke (~80–150 ms for a practiced user). Going much
+// higher adds capture latency for the common pure-copy case; going much
+// lower misses slower replace gestures. Also replaces the prior 80 ms
+// "AppKit settle" sleep — the watch loop serves the same settle purpose.
+const PASTE_WATCH_MS: u64 = 180;
+// How often the watch loop re-reads `paste_seq`. Small enough that even
+// a sub-100 ms paste is caught on the next tick.
+const PASTE_WATCH_TICK_MS: u64 = 15;
+
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
 const TRAY_QUIT: &str = "quit";
@@ -85,6 +100,13 @@ pub struct AppState {
     /// would have its window yanked out from under it by the prior
     /// nudge's stale hide task.
     pub nudge_gen: Arc<AtomicU64>,
+    /// Bumped by the platform listener every time the user presses
+    /// Cmd+V (Ctrl+V on Win/Linux). The copy processor reads the value
+    /// just before its synthetic Cmd+C and again after a short watch
+    /// window; if the counter advanced, the user is doing a
+    /// select-to-replace gesture and we skip the capture so their paste
+    /// lands the prior clipboard contents in the destination.
+    pub paste_seq: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -413,6 +435,26 @@ fn panel_visible(app_handle: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Block up to `PASTE_WATCH_MS` watching for `paste_seq` to advance.
+/// Returns `true` if the user pressed Cmd+V during the window (the
+/// caller should skip the in-flight capture — this is a replace
+/// gesture). Returns `false` if the window expired quietly.
+///
+/// Doubles as the post-drag "OS settle" wait that previously lived as
+/// a fixed `thread::sleep(80)` — the tick polling is cheap and we still
+/// hit AppKit-flush latencies before firing the synthetic Cmd+C.
+fn watch_for_paste(paste_seq: &AtomicU64) -> bool {
+    let seen = paste_seq.load(Ordering::Relaxed);
+    let deadline = Instant::now() + Duration::from_millis(PASTE_WATCH_MS);
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(PASTE_WATCH_TICK_MS));
+        if paste_seq.load(Ordering::Relaxed) != seen {
+            return true;
+        }
+    }
+    false
+}
+
 fn start_copy_processor(
     rx: mpsc::Receiver<SelectionSignal>,
     state: Arc<AppState>,
@@ -441,11 +483,24 @@ fn start_copy_processor(
             }
 
             let before = read_clipboard(&mut clip);
-            thread::sleep(Duration::from_millis(80));
+
+            // Wait for the OS to flush the drag-up AND watch for an
+            // imminent Cmd+V. A replace gesture — drag-select a
+            // destination, then paste — is indistinguishable from a copy
+            // gesture at the mouse-up boundary; the divergence is the
+            // next keystroke. If Cmd+V lands during the watch window the
+            // user is replacing, so we skip the synthetic Cmd+C and let
+            // their paste deliver the prior clipboard contents over the
+            // destination they just selected. Replaces the prior fixed
+            // 80 ms settle sleep — the watch loop serves the same role.
+            if watch_for_paste(&state.paste_seq) {
+                let _ = app_handle.emit(EVT_CAPTURE_SUPPRESSED, "paste_within_window");
+                continue;
+            }
 
             // Re-check just before firing Cmd+C: the panel may have appeared, the
             // user may have toggled auto-copy off, or focus may have moved into
-            // a password field during the sleep.
+            // a password field during the watch window.
             if !state.watcher_enabled() || panel_visible(&app_handle) {
                 continue;
             }
@@ -599,6 +654,7 @@ pub fn run() {
                 last_capture_at: Arc::new(Mutex::new(None)),
                 last_synthetic_copy_at: Arc::new(Mutex::new(None)),
                 nudge_gen: Arc::new(AtomicU64::new(0)),
+                paste_seq: Arc::new(AtomicU64::new(0)),
             });
             app.manage(state.clone());
 
@@ -721,7 +777,7 @@ pub fn run() {
             // second, and we'd rather drop a few during a stall than block the
             // OS event tap thread.
             let (tx_mouse, rx_mouse) = mpsc::sync_channel::<MouseEvent>(64);
-            start_listener(tx, tx_manual, tx_mouse);
+            start_listener(tx, tx_manual, tx_mouse, state.paste_seq.clone());
             start_copy_processor(rx, state.clone(), app.handle().clone());
             start_manual_copy_processor(rx_manual, state.clone(), app.handle().clone());
             paste::start_paste_processor(rx_mouse, state, app.handle().clone());
@@ -755,4 +811,65 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Pluks");
+}
+
+#[cfg(test)]
+mod replace_guard_tests {
+    use super::{watch_for_paste, PASTE_WATCH_MS};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn returns_false_when_no_paste_occurs() {
+        let seq = AtomicU64::new(7);
+        let start = Instant::now();
+        let pasted = watch_for_paste(&seq);
+        let elapsed = start.elapsed();
+        assert!(!pasted, "no paste fired — caller should proceed");
+        // Window should run close to the full duration. Allow slop for the
+        // last sleep tick that overshoots the deadline.
+        assert!(
+            elapsed >= Duration::from_millis(PASTE_WATCH_MS),
+            "watch returned too early: {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed < Duration::from_millis(PASTE_WATCH_MS + 80),
+            "watch overshot the deadline: {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn returns_true_when_paste_arrives_during_window() {
+        let seq = Arc::new(AtomicU64::new(0));
+        let bumper = Arc::clone(&seq);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            bumper.fetch_add(1, Ordering::Relaxed);
+        });
+        let start = Instant::now();
+        let pasted = watch_for_paste(&seq);
+        let elapsed = start.elapsed();
+        handle.join().expect("bumper thread joined");
+        assert!(pasted, "paste fired mid-window — capture should abort");
+        // Should bail well before the full window expires.
+        assert!(
+            elapsed < Duration::from_millis(PASTE_WATCH_MS),
+            "watch did not bail early on paste signal: {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn ignores_pastes_that_predate_the_watch() {
+        // A Cmd+V the user fired earlier (and that's already been counted)
+        // must NOT abort a subsequent unrelated drag-select capture. The
+        // baseline-snapshot semantics guarantee this.
+        let seq = AtomicU64::new(99);
+        let pasted = watch_for_paste(&seq);
+        assert!(!pasted, "stale paste count must not trigger an abort");
+    }
 }

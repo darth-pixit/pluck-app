@@ -4,10 +4,14 @@
  * Anonymous-by-default. Reads opt-out from Tauri-managed `settings.json`
  * via `get_settings`/`set_settings` invokes. Never sends clipboard
  * content, history `content`, hostnames, page URLs, file paths, or PII.
+ *
+ * PostHog ingestion uses a hand-rolled `fetch` to /i/v0/e/ rather than
+ * posthog-js — the SDK shipped batched bodies without an api_key field
+ * and every request 401'd. The website was hitting the same bug and was
+ * switched to this approach in #37; we now match it here.
  */
 import { invoke } from "@tauri-apps/api/core";
 import * as Sentry from "@sentry/react";
-import posthog from "posthog-js";
 
 const POSTHOG_KEY  = (import.meta.env.VITE_POSTHOG_KEY  as string) || "";
 const POSTHOG_HOST = (import.meta.env.VITE_POSTHOG_HOST as string) || "https://us.i.posthog.com";
@@ -140,8 +144,35 @@ function superProps() {
     app_version: APP_VERSION,
     os_platform: _osPlatform,
     os_version: _osVersion,
-    locale: navigator.language || "unknown"
+    locale: navigator.language || "unknown",
+    // Tells PostHog the event came via our managed reverse proxy so the
+    // Web Analytics "Reverse proxy" health check stays green.
+    $lib_custom_api_host: POSTHOG_HOST
   };
+}
+
+// Bare-fetch send to PostHog's /i/v0/e/. Same shape the website now uses.
+function sendEvent(event: string, properties: Record<string, unknown>): void {
+  if (!_settings || _settings.opt_out) return;
+  if (!isRealKey(POSTHOG_KEY)) return;
+  try {
+    const body = JSON.stringify({
+      api_key:     POSTHOG_KEY,
+      event:       event,
+      distinct_id: _settings.anon_id,
+      properties:  properties,
+      timestamp:   new Date().toISOString()
+    });
+    fetch(POSTHOG_HOST + "/i/v0/e/", {
+      method:      "POST",
+      headers:     { "Content-Type": "application/json" },
+      body:        body,
+      keepalive:   true,
+      credentials: "omit"
+    }).catch(() => {});
+  } catch {
+    /* swallow — analytics errors must never break the app */
+  }
 }
 
 function whitelist(event: string, props: Record<string, unknown>): Record<string, unknown> | null {
@@ -178,31 +209,7 @@ export async function initAnalytics(): Promise<void> {
     };
   }
 
-  // PostHog
-  if (isRealKey(POSTHOG_KEY)) {
-    try {
-      posthog.init(POSTHOG_KEY, {
-        api_host: POSTHOG_HOST,
-        // Opt into modern defaults (recommended by PostHog docs).
-        defaults: '2026-01-30',
-        // PostHog's /e/ endpoint 401s on gzip-compressed bodies for this
-        // project — forcing plain JSON works around it.
-        disable_compression: true,
-        autocapture: false,
-        capture_pageview: false,
-        disable_session_recording: true,
-        persistence: "localStorage",
-        bootstrap: { distinctID: _settings.anon_id },
-        opt_out_capturing_by_default: _settings.opt_out,
-        sanitize_properties: (props) => {
-          for (const k of Object.keys(props)) {
-            if (DENY_RX.test(k)) delete (props as Record<string, unknown>)[k];
-          }
-          return props;
-        }
-      });
-    } catch {}
-  }
+  // PostHog ingestion is hand-rolled in sendEvent() — no SDK to init.
 
   // Sentry
   if (isRealKey(SENTRY_DSN) && !_settings.crash_opt_out) {
@@ -255,9 +262,7 @@ export function track(event: EventName, props: Record<string, unknown> = {}): vo
   if (!isRealKey(POSTHOG_KEY)) return;
   const clean = whitelist(event, props);
   if (!clean) return;
-  try {
-    posthog.capture(event, { ...superProps(), ...clean });
-  } catch {}
+  sendEvent(event, { ...superProps(), ...clean });
 }
 
 export function captureException(err: unknown, ctx?: { where?: string }): void {
@@ -299,10 +304,7 @@ export async function setOptOut(optOut: boolean): Promise<void> {
   if (!_settings) return;
   if (optOut && !_settings.opt_out) track("analytics_opted_out", {});
   _settings.opt_out = optOut;
-  try {
-    if (optOut) posthog.opt_out_capturing();
-    else posthog.opt_in_capturing();
-  } catch {}
+  // No SDK to toggle — sendEvent() checks _settings.opt_out at send time.
   if (!optOut) track("analytics_opted_in", {});
   try { await invoke("set_settings", { settings: _settings }); } catch {}
 }
@@ -330,8 +332,9 @@ export function getSettings(): Settings | null {
 export async function resetAnonymousId(): Promise<void> {
   if (!_settings) return;
   _settings.anon_id = crypto.randomUUID();
+  // No SDK identity to reset — sendEvent() reads anon_id from _settings on
+  // every call, so the next event automatically uses the new id.
   try { await invoke("set_settings", { settings: _settings }); } catch {}
-  try { posthog.reset(); posthog.identify(_settings.anon_id); } catch {}
 }
 
 // Window-level error capture
