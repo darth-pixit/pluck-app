@@ -1013,7 +1013,7 @@ body.radial-body {
 }
 .update-banner-dismiss:hover { color: var(--text); }
 .update-banner-notes {
-  margin: 6px 0 8px;
+  margin: 6px 0 0;
   padding-left: 16px;
   color: rgba(255,255,255,0.78);
 }
@@ -1021,6 +1021,7 @@ body.radial-body {
 .update-banner-actions {
   display: flex;
   gap: 6px;
+  margin-top: 8px;
 }
 .update-banner-primary,
 .update-banner-secondary {
