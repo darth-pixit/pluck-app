@@ -388,9 +388,9 @@ body:not(.platform-mac) .traffic-lights { display: none; }
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(252, 76, 2, 0.18);
 }
 .paste-actions-label {
   font-size: 10.5px;
