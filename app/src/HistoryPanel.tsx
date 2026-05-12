@@ -41,9 +41,7 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLUListElement>(null);
 
-  const activeItem = items[active];
   const detections = useMemo(() => items.map(i => detect(i.content)), [items]);
-  const activeDetection = detections[active] ?? null;
 
   useEffect(() => {
     if (items[active]) onActiveChange?.(items[active].id);
@@ -103,29 +101,27 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
     el?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const handleAction = (action: PasteAction) => {
-    if (!activeItem || !onCopyTransformed) return;
-    onCopyTransformed(
-      action.transform(activeItem.content),
-      action.label,
-      activeDetection?.kind ?? "unknown"
-    );
+  const handleAction = (action: PasteAction, item: HistoryItem, kind: string) => {
+    if (!onCopyTransformed) return;
+    onCopyTransformed(action.transform(item.content), action.label, kind);
   };
 
   return (
-    <>
-      <ul className="history-list" ref={listRef}>
-        {items.map((item, idx) => (
+    <ul className="history-list" ref={listRef}>
+      {items.map((item, idx) => {
+        const detection = detections[idx];
+        const isActive = idx === active;
+        return (
           <li
             key={item.id}
-            className={`history-item ${idx === active ? "active" : ""}`}
+            className={`history-item ${isActive ? "active" : ""}`}
             onMouseEnter={() => setActive(idx)}
             onClick={() => onCopy(item.id)}
           >
             <span className="item-preview">
-              {detections[idx] && (
-                <span className={`kind-badge kind-${detections[idx]!.kind}`}>
-                  {detections[idx]!.badge}
+              {detection && (
+                <span className={`kind-badge kind-${detection.kind}`}>
+                  {detection.badge}
                 </span>
               )}
               {item.content.length > 120
@@ -143,24 +139,24 @@ export default function HistoryPanel({ items, onCopy, onDelete, onActiveChange, 
                 ×
               </button>
             </div>
+            {isActive && detection && (
+              <div className="paste-actions" onClick={(e) => e.stopPropagation()}>
+                <span className="paste-actions-label">Paste as</span>
+                {detection.actions.map(action => (
+                  <button
+                    key={action.label}
+                    className="paste-action"
+                    title={`Paste ${item.content.slice(0, 40)}… as ${action.label}`}
+                    onClick={(e) => { e.stopPropagation(); handleAction(action, item, detection.kind); }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </li>
-        ))}
-      </ul>
-      {activeDetection && (
-        <div className="paste-actions">
-          <span className="paste-actions-label">Paste as</span>
-          {activeDetection.actions.map(action => (
-            <button
-              key={action.label}
-              className="paste-action"
-              title={`Paste ${activeItem!.content.slice(0, 40)}… as ${action.label}`}
-              onClick={(e) => { e.stopPropagation(); handleAction(action); }}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </>
+        );
+      })}
+    </ul>
   );
 }
