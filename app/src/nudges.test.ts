@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { decideAffirmation, decideCorrective, readStats, resetNudgeStats } from "./nudges";
+import {
+  decideAffirmation,
+  decideCorrective,
+  decideHoldAffirmation,
+  decideHoldDiscovery,
+  readStats,
+  resetNudgeStats,
+} from "./nudges";
 
 beforeEach(() => {
   resetNudgeStats();
@@ -137,15 +144,99 @@ describe("decideCorrective()", () => {
   });
 });
 
+describe("decideHoldAffirmation()", () => {
+  it("fires for first 20 holds (every-1 tier)", () => {
+    for (let i = 1; i <= 20; i++) {
+      const d = decideHoldAffirmation();
+      expect(d.show).toBe(true);
+      if (d.show) {
+        expect(d.kind).toBe("pasted_via_hold");
+        expect(d.text).toBe("✦ Pasted");
+        expect(d.selects).toBe(i);
+      }
+    }
+  });
+
+  it("decays alongside the copy-side affirmation tiers", () => {
+    for (let i = 0; i < 20; i++) decideHoldAffirmation();
+    let shown = 0;
+    for (let i = 21; i <= 50; i++) {
+      if (decideHoldAffirmation().show) shown++;
+    }
+    expect(shown).toBe(10);
+  });
+
+  it("stops firing after 200 holds", () => {
+    for (let i = 0; i < 200; i++) decideHoldAffirmation();
+    const d = decideHoldAffirmation();
+    expect(d.show).toBe(false);
+    if (!d.show) expect(d.reason).toBe("past_decay_horizon");
+  });
+
+  it("hold counter is independent of the copy-side selects counter", () => {
+    for (let i = 0; i < 5; i++) decideAffirmation();
+    for (let i = 0; i < 3; i++) decideHoldAffirmation();
+    const s = readStats();
+    expect(s.selects).toBe(5);
+    expect(s.holds).toBe(3);
+  });
+});
+
+describe("decideHoldDiscovery()", () => {
+  it("suppresses when below 10 selects", () => {
+    for (let i = 0; i < 9; i++) decideAffirmation();
+    const d = decideHoldDiscovery();
+    expect(d.show).toBe(false);
+    if (!d.show) expect(d.reason).toBe("below_baseline");
+  });
+
+  it("suppresses when the user has already used the hold gesture", () => {
+    for (let i = 0; i < 20; i++) decideAffirmation();
+    decideHoldAffirmation();
+    const d = decideHoldDiscovery();
+    expect(d.show).toBe(false);
+    if (!d.show) expect(d.reason).toBe("already_discovered");
+  });
+
+  it("fires once after 10 selects with zero holds", () => {
+    for (let i = 0; i < 10; i++) decideAffirmation();
+    const d = decideHoldDiscovery();
+    expect(d.show).toBe(true);
+    if (d.show) {
+      expect(d.kind).toBe("hold_discovery");
+      expect(d.text).toBe("✦ Press and hold to paste");
+    }
+  });
+
+  it("never fires twice — even past the cooldown", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2030, 0, 1));
+    for (let i = 0; i < 10; i++) decideAffirmation();
+    expect(decideHoldDiscovery().show).toBe(true);
+    // 24h later, still suppressed by the shown-limit cap.
+    vi.setSystemTime(new Date(2030, 0, 2));
+    const second = decideHoldDiscovery();
+    expect(second.show).toBe(false);
+    if (!second.show) expect(second.reason).toBe("shown_limit");
+    vi.useRealTimers();
+  });
+});
+
 describe("resetNudgeStats()", () => {
   it("clears all counters", () => {
     for (let i = 0; i < 5; i++) decideAffirmation();
     for (let i = 0; i < 3; i++) decideCorrective();
+    for (let i = 0; i < 4; i++) decideHoldAffirmation();
+    decideHoldDiscovery();
     resetNudgeStats();
     const s = readStats();
     expect(s.selects).toBe(0);
     expect(s.redundantCopies).toBe(0);
     expect(s.affirmationsShown).toBe(0);
     expect(s.lastCorrectiveAt).toBe(0);
+    expect(s.holds).toBe(0);
+    expect(s.holdAffirmationsShown).toBe(0);
+    expect(s.holdDiscoveryShown).toBe(0);
+    expect(s.lastHoldDiscoveryAt).toBe(0);
   });
 });

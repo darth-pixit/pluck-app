@@ -21,9 +21,9 @@ describe("ActivationTour", () => {
     expect(onDone).toHaveBeenCalledWith("skipped", 0);
   });
 
-  it("renders all 4 progress dots", () => {
+  it("renders all 5 progress dots", () => {
     const { container } = render(<ActivationTour onDone={() => {}} />);
-    expect(container.querySelectorAll(".tour-dot").length).toBe(4);
+    expect(container.querySelectorAll(".tour-dot").length).toBe(5);
   });
 
   it("paste step renders a textarea that completes when onPaste fires", () => {

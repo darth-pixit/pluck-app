@@ -11,6 +11,17 @@ pub struct SelectionSignal;
 /// Cmd+C — lib.rs filters those via a synthetic-copy timestamp.
 pub struct ManualCopySignal;
 
+/// Low-level left-mouse stream forwarded to `paste.rs`, which derives the
+/// long-press gesture from it. The `Move` variant only fires while the
+/// button is down — we don't care about hover motion. Coordinates are in
+/// the same screen space `cursor_pos()` returns (logical pixels on macOS,
+/// physical pixels on Windows; the radial window's position units match).
+pub enum MouseEvent {
+    Down { x: f64, y: f64 },
+    Move { x: f64, y: f64 },
+    Up   { x: f64, y: f64 },
+}
+
 const DRAG_PIXEL_THRESHOLD: f64 = 4.0;
 const MULTI_CLICK_MIN_GAP_MS: u128 = 30;
 const MULTI_CLICK_MAX_GAP_MS: u128 = 600;
@@ -457,6 +468,7 @@ mod mac_tap {
 
     const K_CG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
     const K_CG_EVENT_LEFT_MOUSE_UP: u32 = 2;
+    const K_CG_EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
     const K_CG_EVENT_KEY_DOWN: u32 = 10;
     const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFFFFFE;
     const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFFFFFF;
@@ -500,6 +512,7 @@ mod mac_tap {
     struct Ctx {
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        tx_mouse: mpsc::SyncSender<MouseEvent>,
         press_x: f64,
         press_y: f64,
         button_down: bool,
@@ -529,11 +542,19 @@ mod mac_tap {
                 ctx.press_x = p.x;
                 ctx.press_y = p.y;
                 ctx.button_down = true;
+                let _ = ctx.tx_mouse.try_send(MouseEvent::Down { x: p.x, y: p.y });
+            }
+            K_CG_EVENT_LEFT_MOUSE_DRAGGED => {
+                if ctx.button_down {
+                    let p = CGEventGetLocation(ev);
+                    let _ = ctx.tx_mouse.try_send(MouseEvent::Move { x: p.x, y: p.y });
+                }
             }
             K_CG_EVENT_LEFT_MOUSE_UP => {
                 if ctx.button_down {
                     ctx.button_down = false;
                     let p = CGEventGetLocation(ev);
+                    let _ = ctx.tx_mouse.try_send(MouseEvent::Up { x: p.x, y: p.y });
                     let dx = (p.x - ctx.press_x).abs();
                     let dy = (p.y - ctx.press_y).abs();
                     let gap = ctx.last_release.elapsed().as_millis();
@@ -576,14 +597,17 @@ mod mac_tap {
     pub fn run(
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        tx_mouse: mpsc::SyncSender<MouseEvent>,
     ) {
         let mask: u64 = (1u64 << K_CG_EVENT_LEFT_MOUSE_DOWN)
             | (1u64 << K_CG_EVENT_LEFT_MOUSE_UP)
+            | (1u64 << K_CG_EVENT_LEFT_MOUSE_DRAGGED)
             | (1u64 << K_CG_EVENT_KEY_DOWN);
 
         let ctx = Box::into_raw(Box::new(Ctx {
             tx,
             tx_manual,
+            tx_mouse,
             press_x: 0.0,
             press_y: 0.0,
             button_down: false,
@@ -637,6 +661,7 @@ mod rdev_listener {
     pub fn run(
         tx: mpsc::SyncSender<SelectionSignal>,
         tx_manual: mpsc::SyncSender<ManualCopySignal>,
+        tx_mouse: mpsc::SyncSender<MouseEvent>,
     ) {
         let mut press_x = 0.0_f64;
         let mut press_y = 0.0_f64;
@@ -652,15 +677,23 @@ mod rdev_listener {
         let mut meta = false;
 
         let cb = move |ev: Event| match ev.event_type {
-            EventType::MouseMove { x, y } => { cur_x = x; cur_y = y; }
+            EventType::MouseMove { x, y } => {
+                cur_x = x;
+                cur_y = y;
+                if button_down {
+                    let _ = tx_mouse.try_send(MouseEvent::Move { x, y });
+                }
+            }
             EventType::ButtonPress(Button::Left) => {
                 press_x = cur_x;
                 press_y = cur_y;
                 button_down = true;
+                let _ = tx_mouse.try_send(MouseEvent::Down { x: cur_x, y: cur_y });
             }
             EventType::ButtonRelease(Button::Left) => {
                 if !button_down { return; }
                 button_down = false;
+                let _ = tx_mouse.try_send(MouseEvent::Up { x: cur_x, y: cur_y });
                 let dx = (cur_x - press_x).abs();
                 let dy = (cur_y - press_y).abs();
                 let gap = last_release.elapsed().as_millis();
@@ -713,6 +746,7 @@ mod rdev_listener {
 pub fn start_listener(
     tx: mpsc::SyncSender<SelectionSignal>,
     tx_manual: mpsc::SyncSender<ManualCopySignal>,
+    tx_mouse: mpsc::SyncSender<MouseEvent>,
 ) {
     thread::spawn(move || {
         loop {
@@ -723,10 +757,10 @@ pub fn start_listener(
         dlog!("[pluks] Permissions confirmed — starting listener.");
 
         #[cfg(target_os = "macos")]
-        mac_tap::run(tx, tx_manual);
+        mac_tap::run(tx, tx_manual, tx_mouse);
 
         #[cfg(not(target_os = "macos"))]
-        rdev_listener::run(tx, tx_manual);
+        rdev_listener::run(tx, tx_manual, tx_mouse);
     });
 }
 

@@ -15,8 +15,8 @@ const SHORTCUT_HINT = navigator.userAgent.includes("Mac") ? "⌘⇧V" : "Ctrl+Sh
 const SAMPLE_1 = "Pluks just copied this sentence the moment you highlighted it.";
 const SAMPLE_2 = "Highlight me too — I'll stack on top of the first one.";
 
-type StepKind = "select-1" | "paste" | "select-2" | "shortcut";
-const STEPS: StepKind[] = ["select-1", "paste", "select-2", "shortcut"];
+type StepKind = "select-1" | "paste" | "select-2" | "hold-to-paste" | "shortcut";
+const STEPS: StepKind[] = ["select-1", "paste", "select-2", "hold-to-paste", "shortcut"];
 
 interface Props {
   onDone: (reason: "skipped" | "completed", stepsDone: number) => void;
@@ -40,6 +40,12 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
     body: "Each new selection lands on top of your history. The last 100 stay around.",
     success: "Two clips banked. You're getting it.",
     nextLabel: "Next →",
+  },
+  "hold-to-paste": {
+    title: "Hold to paste — no Cmd+V either",
+    body: "Anywhere on your Mac, press and hold for half a second. A wheel of your recent clips appears. Drag to one, let go — pasted.",
+    success: "You'll feel it when you try it.",
+    nextLabel: "Got it →",
   },
   shortcut: {
     title: `Open your stash with ${SHORTCUT_HINT}`,
@@ -68,6 +74,7 @@ export default function ActivationTour({ onDone }: Props) {
     "select-1": false,
     paste: false,
     "select-2": false,
+    "hold-to-paste": false,
     shortcut: false,
   });
   const sample1Ref = useRef<HTMLParagraphElement>(null);
@@ -121,6 +128,20 @@ export default function ActivationTour({ onDone }: Props) {
     });
     return () => { un.then(fn => fn()); };
   }, []);
+
+  // Hold-to-paste is the one step we can't gesture-gate inside the tour:
+  // the radial requires the history panel to be closed, but closing it
+  // tears down the tour. Treat it as an awareness step — auto-mark hit
+  // as soon as we land on it so the user can advance after reading the
+  // explanation. The in-product discovery nudge (`hold_discovery` in
+  // nudges.ts) handles real-world reinforcement once they have clips banked.
+  useEffect(() => {
+    if (step !== "hold-to-paste") return;
+    const t = setTimeout(() => {
+      setHit(prev => prev["hold-to-paste"] ? prev : { ...prev, "hold-to-paste": true });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [step]);
 
   // Brief celebration delay before auto-advancing each step, so the
   // success message is actually readable.
@@ -198,6 +219,9 @@ export default function ActivationTour({ onDone }: Props) {
             {SAMPLE_2}
           </p>
         )}
+        {step === "hold-to-paste" && (
+          <HoldDemo done={hit["hold-to-paste"]} />
+        )}
         {step === "shortcut" && (
           <div className={`activation-shortcut ${hit.shortcut ? "done" : ""}`}>
             <kbd>{SHORTCUT_HINT}</kbd>
@@ -225,6 +249,59 @@ export default function ActivationTour({ onDone }: Props) {
           ✓ Password fields are skipped automatically — Pluks never captures
           what you type into a secure input.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Static-ish radial diagram for the activation tour. Renders the same
+ * 5-slice geometry the real radial uses (see RadialMenu.tsx and paste.rs)
+ * so the user recognises the shape when they encounter it in product. The
+ * CSS handles a gentle "press" pulse so it reads as a gesture, not a logo.
+ */
+function HoldDemo({ done }: { done: boolean }) {
+  const SIZE = 160;
+  const CENTER = SIZE / 2;
+  const INNER = 24;
+  const OUTER = 70;
+  const SLICES = 5;
+  const STEP = 360 / SLICES;
+  const polar = (deg: number, r: number): [number, number] => {
+    const rad = (deg * Math.PI) / 180;
+    return [CENTER + r * Math.sin(rad), CENTER - r * Math.cos(rad)];
+  };
+  const path = (i: number): string => {
+    const a0 = i * STEP - STEP / 2;
+    const a1 = i * STEP + STEP / 2;
+    const [ox0, oy0] = polar(a0, OUTER);
+    const [ox1, oy1] = polar(a1, OUTER);
+    const [ix0, iy0] = polar(a0, INNER);
+    const [ix1, iy1] = polar(a1, INNER);
+    return [
+      `M ${ox0} ${oy0}`,
+      `A ${OUTER} ${OUTER} 0 0 1 ${ox1} ${oy1}`,
+      `L ${ix1} ${iy1}`,
+      `A ${INNER} ${INNER} 0 0 0 ${ix0} ${iy0}`,
+      "Z",
+    ].join(" ");
+  };
+
+  return (
+    <div className={`hold-demo ${done ? "done" : ""}`}>
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} aria-hidden="true">
+        {Array.from({ length: SLICES }).map((_, i) => (
+          <path
+            key={i}
+            d={path(i)}
+            className={`hold-demo-slice ${i === 1 ? "highlight" : ""}`}
+            style={{ animationDelay: `${i * 90}ms` }}
+          />
+        ))}
+        <circle cx={CENTER} cy={CENTER} r={INNER - 3} className="hold-demo-hub" />
+      </svg>
+      <div className="hold-demo-caption">
+        press <kbd>·</kbd> hold <kbd>·</kbd> release on a slice
       </div>
     </div>
   );

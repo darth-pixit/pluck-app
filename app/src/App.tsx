@@ -8,7 +8,13 @@ import UpdateBanner from "./UpdateBanner";
 import ActivationTour, { shouldShowActivationTour } from "./ActivationTour";
 import { startUpdater } from "./updater";
 import { bucket, safeInvoke, track } from "./analytics";
-import { decideAffirmation, decideCorrective, type NudgeDecision } from "./nudges";
+import {
+  decideAffirmation,
+  decideCorrective,
+  decideHoldAffirmation,
+  decideHoldDiscovery,
+  type NudgeDecision,
+} from "./nudges";
 import { detect } from "./detectors";
 import "./index.css";
 
@@ -370,9 +376,13 @@ export default function App() {
   }, []);
 
   // Surface the nudge or record why it was suppressed. Shared between
-  // the new-selection (affirmation) and manual-copy (corrective) paths
-  // so both branches see the same observability shape in PostHog.
-  const runNudge = useCallback((decision: NudgeDecision, kind: "affirmation" | "corrective") => {
+  // the new-selection (affirmation), manual-copy (corrective), and
+  // radial-paste (pasted_via_hold / hold_discovery) paths so every branch
+  // emits the same observability shape in PostHog.
+  const runNudge = useCallback((
+    decision: NudgeDecision,
+    kind: "affirmation" | "corrective" | "pasted_via_hold" | "hold_discovery",
+  ) => {
     if (decision.show) {
       safeInvoke("show_nudge", { kind: decision.kind, text: decision.text }).catch(() => {});
       track("nudge_shown", {
@@ -393,10 +403,70 @@ export default function App() {
         const filtered = prev.filter(i => i.id !== event.payload.id);
         return [event.payload, ...filtered].slice(0, 100);
       });
-      runNudge(decideAffirmation(), "affirmation");
+      const aff = decideAffirmation();
+      runNudge(aff, "affirmation");
+      // Discovery nudge runs only when the affirmation is suppressed, so
+      // two nudges never overlap in the same render frame. The decay logic
+      // inside `decideHoldDiscovery` still gates by select count + holds=0
+      // + once-per-install cap.
+      if (!aff.show) {
+        runNudge(decideHoldDiscovery(), "hold_discovery");
+      }
     });
     return () => { unlisten.then(fn => fn()); };
   }, [runNudge]);
+
+  // Long-press radial paste menu — Rust emits four events tied to the
+  // gesture lifecycle. We forward each to PostHog and, on a successful
+  // commit, drive the adaptive paste-side affirmation through the same
+  // nudge engine as the copy-side.
+  useEffect(() => {
+    type HidePayload = {
+      reason: "committed" | "cancelled" | "clipboard_failed";
+      index?: number;
+      char_count?: number;
+    };
+    type SuppressedPayload = { reason: string };
+    type ShowPayload = { items: Array<{ id: number }>; center: { x: number; y: number } };
+
+    const unShow = listen<ShowPayload>("radial-show", event => {
+      const count = event.payload?.items?.length ?? 0;
+      track("radial_shown", { items_count_bucket: bucket(count) });
+    });
+
+    const unHide = listen<HidePayload>("radial-hide", event => {
+      const p = event.payload;
+      if (p.reason === "committed") {
+        // Find the pasted item locally (if it's still in our snapshot) so we
+        // can tag the event with its detected kind. We deliberately don't
+        // expose the actual content — `detect()` only inspects shape.
+        let kindTag = "unknown";
+        if (typeof p.index === "number" && p.index >= 0 && p.index < items.length) {
+          const it = items[p.index];
+          const det = detect(it.content);
+          kindTag = det?.kind || "text";
+        }
+        track("radial_committed", {
+          slice_index: typeof p.index === "number" ? p.index : -1,
+          char_count_bucket: bucket(p.char_count ?? 0),
+          kind: kindTag,
+        });
+        runNudge(decideHoldAffirmation(), "pasted_via_hold");
+      } else {
+        track("radial_cancelled", { reason: p.reason });
+      }
+    });
+
+    const unSuppressed = listen<SuppressedPayload>("radial-suppressed", event => {
+      track("radial_suppressed", { reason: event.payload?.reason || "unknown" });
+    });
+
+    return () => {
+      unShow.then(fn => fn());
+      unHide.then(fn => fn());
+      unSuppressed.then(fn => fn());
+    };
+  }, [items, runNudge]);
 
   // The Rust copy processor emits `capture-suppressed` when it declines to
   // auto-copy because focus is inside a password field. Forward it as

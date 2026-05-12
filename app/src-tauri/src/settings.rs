@@ -22,7 +22,16 @@ pub struct Settings {
     pub analytics_first_seen_version: String,
     #[serde(default)]
     pub last_seen_version: String,
+    /// Long-press anywhere to reveal a radial menu of recent clips. On by
+    /// default; users who don't want a global hold gesture can disable it
+    /// in Preferences. Older settings.json files (pre-feature) deserialize
+    /// with the `default_true` helper rather than `Default::default()`,
+    /// which would silently flip them to false on upgrade.
+    #[serde(default = "default_true")]
+    pub enable_long_press_paste: bool,
 }
+
+fn default_true() -> bool { true }
 
 impl Settings {
     pub(crate) fn fresh() -> Self {
@@ -32,6 +41,7 @@ impl Settings {
             crash_opt_out: false,
             analytics_first_seen_version: String::new(),
             last_seen_version: String::new(),
+            enable_long_press_paste: true,
         }
     }
 }
@@ -219,5 +229,14 @@ mod tests {
         assert!(!s.opt_out);
         assert!(!s.crash_opt_out);
         assert!(s.analytics_first_seen_version.is_empty());
+        // Pre-feature records must upgrade with the long-press toggle ON —
+        // matching the new-install default. A serde `default` would have
+        // landed at `false` and silently disabled the feature.
+        assert!(s.enable_long_press_paste);
+    }
+
+    #[test]
+    fn fresh_enables_long_press_paste() {
+        assert!(Settings::fresh().enable_long_press_paste);
     }
 }
