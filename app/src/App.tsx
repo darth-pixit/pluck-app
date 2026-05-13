@@ -146,6 +146,11 @@ function SetupScreen({
       </div>
       <p className="setup-hint">After granting each permission, come back here — this screen updates automatically.</p>
       <p className="setup-privacy-note">
+        <strong>Your clipboard history stays on this Mac.</strong> The last 100
+        clips are stored in a local file on your own disk — never the cloud,
+        never our servers, never anywhere else.
+      </p>
+      <p className="setup-privacy-note">
         <strong>Passwords stay private.</strong> Pluks detects password fields
         via macOS Accessibility and never captures what's inside them.
       </p>
@@ -176,8 +181,8 @@ const TOUR_STEPS: TourStep[] = [
     body: "Hit the shortcut from any app to open your clipboard history. Search, click, paste — anything you copied recently is one tap away.",
   },
   {
-    title: "Privacy first — local only",
-    body: "What you copy stays on this Mac. Pluks doesn't read it, doesn't sync it, doesn't send it anywhere. Open source, on-device, full stop.",
+    title: "Your clips live on this Mac. Period.",
+    body: "Every clip is stored in a local file on your own disk — never the cloud, never our servers, never anywhere else. Pluks doesn't read it, doesn't sync it, doesn't send it. Open source, on-device, full stop.",
   },
 ];
 

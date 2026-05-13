@@ -566,6 +566,25 @@ a:hover { text-decoration: underline; }
   line-height: 1.7;
 }
 
+/* Reassurance callout: "your clips never leave this machine". Sits under the
+   main paragraph and uses the accent border to read as a promise, not a footnote. */
+.history-local-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 14px 16px;
+  background: rgba(252,76,2,.06);
+  border: 1px solid rgba(252,76,2,.25);
+  border-left: 3px solid var(--accent-3);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(255,255,255,.78);
+}
+.history-local-note strong { color: #fff; font-weight: 600; }
+.history-local-icon { font-size: 18px; line-height: 1.4; flex-shrink: 0; }
+
 kbd {
   background: rgba(255,255,255,.08);
   border: 1px solid var(--border);

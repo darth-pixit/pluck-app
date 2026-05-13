@@ -37,7 +37,7 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
   },
   "select-2": {
     title: "Stack another clip",
-    body: "Each new selection lands on top of your history. The last 100 stay around.",
+    body: "Each new selection lands on top of your history. The last 100 stay around — stored locally on this Mac, never anywhere else.",
     success: "Two clips banked. You're getting it.",
     nextLabel: "Next →",
   },
