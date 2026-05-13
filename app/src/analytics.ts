@@ -50,7 +50,7 @@ const SCHEMA: Record<string, readonly string[]> = {
   manual_copy_pressed:           ["since_last_capture_ms_bucket"],
 
   permission_check:              ["accessibility_granted", "input_monitoring_granted"],
-  permission_grant_clicked:      ["permission"],
+  permission_grant_clicked:      ["permission", "source"],
   permission_granted:            ["permission", "seconds_since_first_seen"],
   permission_denied_or_skipped:  ["permission"],
 
