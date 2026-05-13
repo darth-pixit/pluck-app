@@ -43,6 +43,24 @@ macro_rules! dlog {
 
 // ── macOS: permission checks ───────────────────────────────────────────────────
 
+// IOHIDRequestType enum from <IOKit/hid/IOHIDLib.h>:
+//   kIOHIDRequestTypeListenEvent = 0 — global event-tap listener
+//                                       (this is the Input Monitoring grant)
+//   kIOHIDRequestTypePostEvent   = 1 — event synthesis
+//                                       (already covered by Accessibility)
+//
+// We need ListenEvent: Pluks installs a CGEventTap on kCGHIDEventTap to LISTEN
+// for the user's selection/copy gestures. Passing PostEvent here is a silent
+// bug — `IOHIDCheckAccess(1)` returns Granted whenever Accessibility is
+// granted (because AX covers event posting), so the UI shows ✓ Granted even
+// when Pluks isn't in the Input Monitoring list and the event tap is dead.
+// Symmetrically, `IOHIDRequestAccess(1)` prompts for post-event access — it
+// does NOT add the app to the Input Monitoring list, which is why "Grant →"
+// previously landed users on an Input Monitoring pane that didn't contain
+// Pluks at all.
+#[cfg(target_os = "macos")]
+const K_IO_HID_REQUEST_TYPE_LISTEN_EVENT: u32 = 0;
+
 #[cfg(target_os = "macos")]
 pub fn ax_is_trusted() -> bool {
     #[link(name = "ApplicationServices", kind = "framework")]
@@ -58,7 +76,7 @@ pub fn input_monitoring_granted() -> bool {
     extern "C" {
         fn IOHIDCheckAccess(request_type: u32) -> i32;
     }
-    unsafe { IOHIDCheckAccess(1) == 0 }
+    unsafe { IOHIDCheckAccess(K_IO_HID_REQUEST_TYPE_LISTEN_EVENT) == 0 }
 }
 
 // Actively asks macOS for Accessibility permission. Unlike `AXIsProcessTrusted`,
@@ -156,7 +174,7 @@ pub fn request_input_monitoring() -> bool {
     extern "C" {
         fn IOHIDRequestAccess(request_type: u32) -> bool;
     }
-    unsafe { IOHIDRequestAccess(1) }
+    unsafe { IOHIDRequestAccess(K_IO_HID_REQUEST_TYPE_LISTEN_EVENT) }
 }
 
 // Windows & Linux don't gate global input behind a per-app permission the way
