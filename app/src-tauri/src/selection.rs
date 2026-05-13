@@ -61,6 +61,104 @@ pub fn input_monitoring_granted() -> bool {
     unsafe { IOHIDCheckAccess(1) == 0 }
 }
 
+// Actively asks macOS for Accessibility permission. Unlike `AXIsProcessTrusted`,
+// `AXIsProcessTrustedWithOptions` with `kAXTrustedCheckOptionPrompt=true` adds
+// the app to the System Settings → Accessibility list (if not already present)
+// and surfaces the standard "X would like to control your computer" prompt.
+// Without this we can't recover if the user removes Pluks from the list — the
+// passive check would loop forever and the in-app "Open Settings" button would
+// land them on a panel that no longer contains Pluks.
+//
+// Returns the current trust state. The user's grant (when given) only takes
+// effect on the next process launch, so we still poll `ax_is_trusted()` from
+// `start_listener` for the live update.
+#[cfg(target_os = "macos")]
+pub fn request_accessibility() -> bool {
+    use std::ffi::c_void;
+    use std::ptr;
+
+    type CFTypeRef = *const c_void;
+    type CFStringRef = *const c_void;
+    type CFDictionaryRef = *const c_void;
+
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: CFTypeRef);
+        fn CFStringCreateWithBytes(
+            alloc: CFTypeRef,
+            bytes: *const u8,
+            num_bytes: isize,
+            encoding: u32,
+            is_external_representation: u8,
+        ) -> CFStringRef;
+        fn CFDictionaryCreate(
+            allocator: CFTypeRef,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> CFDictionaryRef;
+        static kCFTypeDictionaryKeyCallBacks: c_void;
+        static kCFTypeDictionaryValueCallBacks: c_void;
+        static kCFBooleanTrue: CFTypeRef;
+    }
+
+    // Same workaround as `focus_is_secure_field`: don't try to extern-static
+    // the kAX* CFString constant — its symbol resolution is unreliable through
+    // the umbrella framework. Build the CFString from the documented literal
+    // ("AXTrustedCheckOptionPrompt") and the AX API will compare it by value.
+    unsafe {
+        let key_bytes = b"AXTrustedCheckOptionPrompt";
+        let key = CFStringCreateWithBytes(
+            ptr::null(),
+            key_bytes.as_ptr(),
+            key_bytes.len() as isize,
+            K_CF_STRING_ENCODING_UTF8,
+            0,
+        );
+        if key.is_null() {
+            return AXIsProcessTrustedWithOptions(ptr::null());
+        }
+        let keys = [key];
+        let values = [kCFBooleanTrue];
+        let opts = CFDictionaryCreate(
+            ptr::null(),
+            keys.as_ptr() as *const *const c_void,
+            values.as_ptr() as *const *const c_void,
+            1,
+            &kCFTypeDictionaryKeyCallBacks as *const _ as *const c_void,
+            &kCFTypeDictionaryValueCallBacks as *const _ as *const c_void,
+        );
+        let trusted = AXIsProcessTrustedWithOptions(opts);
+        if !opts.is_null() { CFRelease(opts); }
+        CFRelease(key);
+        trusted
+    }
+}
+
+// Actively asks macOS for Input Monitoring permission. `IOHIDCheckAccess` is a
+// passive query — it never causes the OS prompt to appear, so on a fresh
+// install (or after the user removes Pluks from the list) we have no way to
+// re-surface the prompt without explicitly calling `IOHIDRequestAccess`.
+// Returns whether access is granted right now. As with Accessibility, a grant
+// only becomes observable to the in-process event tap on the next launch.
+#[cfg(target_os = "macos")]
+pub fn request_input_monitoring() -> bool {
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOHIDRequestAccess(request_type: u32) -> bool;
+    }
+    unsafe { IOHIDRequestAccess(1) }
+}
+
 // Windows & Linux don't gate global input behind a per-app permission the way
 // macOS does (Accessibility / Input Monitoring). The OS either allows global
 // hooks for any process or it doesn't (Wayland under most compositors blocks
@@ -71,6 +169,12 @@ pub fn ax_is_trusted() -> bool { true }
 
 #[cfg(not(target_os = "macos"))]
 pub fn input_monitoring_granted() -> bool { true }
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_accessibility() -> bool { true }
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_input_monitoring() -> bool { true }
 
 // ── Secure-field focus detection ──────────────────────────────────────────────
 //
@@ -776,6 +880,21 @@ pub fn start_listener(
     paste_seq: Arc<AtomicU64>,
 ) {
     thread::spawn(move || {
+        // Surface the OS prompts up-front if either permission is missing.
+        // The passive checks below (`ax_is_trusted` / `input_monitoring_granted`)
+        // only *report* the state — they don't ask. Without an active request
+        // here, a user who removes Pluks from System Settings → Input
+        // Monitoring and relaunches would loop forever with no prompt and no
+        // way back: the entry is gone from the list so the "Open Settings"
+        // button lands on an empty panel. `IOHIDRequestAccess` and
+        // `AXIsProcessTrustedWithOptions` both re-add the app to their
+        // respective lists and trigger the standard macOS prompt.
+        if !ax_is_trusted() {
+            let _ = request_accessibility();
+        }
+        if !input_monitoring_granted() {
+            let _ = request_input_monitoring();
+        }
         loop {
             if ax_is_trusted() && input_monitoring_granted() { break; }
             dlog!("[pluks] Waiting for Accessibility / Input Monitoring permission...");
