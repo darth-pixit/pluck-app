@@ -805,6 +805,36 @@ pub fn run() {
             start_manual_copy_processor(rx_manual, state.clone(), app.handle().clone());
             paste::start_paste_processor(rx_mouse, state, app.handle().clone());
 
+            // Auto-surface the panel when either macOS permission is missing.
+            // Without this, a user who hasn't (yet, or any longer) granted
+            // Accessibility / Input Monitoring sees *nothing*: LSUIElement +
+            // ActivationPolicy::Accessory means no Dock icon, and the history
+            // window starts hidden. The OS-level prompt that
+            // `request_accessibility` / `request_input_monitoring` triggers
+            // only fires the first time TCC has ever asked for this app — on
+            // an upgrade, a re-install, or any flow where the user previously
+            // dismissed the dialog, no prompt ever appears. The result was a
+            // silently broken app: capture didn't fire, long-press didn't
+            // arm (the CGEventTap install in `selection::mac_tap` fails
+            // without Input Monitoring), and there was no UI nudging the
+            // user to fix it.
+            //
+            // Forcing the window open here puts the SetupScreen in front of
+            // the user with its "Grant →" buttons; those re-call the request
+            // APIs *and* open the relevant System Settings panel, which
+            // recovers from every TCC state — including the case where
+            // Pluks had been removed from the list entirely. Once the user
+            // grants, the background polling in `start_listener` picks up
+            // the change and the panel flips itself to the main view.
+            //
+            // When everything is already granted we leave the window hidden
+            // — that's the intended invisible-launch default.
+            if !ax_is_trusted() || !input_monitoring_granted() {
+                if let Some(win) = app.get_webview_window(WIN_HISTORY) {
+                    show_history_window(&win, false);
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
