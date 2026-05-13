@@ -6,8 +6,9 @@ mod settings;
 use history::{Database, HistoryItem};
 use selection::{
     activate_pid, ax_is_trusted, cursor_pos, focus_is_secure_field, frontmost_pid,
-    input_monitoring_granted, read_clipboard, simulate_copy, simulate_paste, start_listener,
-    write_clipboard, Clipboard, ManualCopySignal, MouseEvent, SelectionSignal,
+    input_monitoring_granted, read_clipboard, request_accessibility, request_input_monitoring,
+    simulate_copy, simulate_paste, start_listener, write_clipboard, Clipboard, ManualCopySignal,
+    MouseEvent, SelectionSignal,
 };
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -240,6 +241,12 @@ fn check_input_monitoring() -> bool {
 fn open_accessibility_settings() {
     #[cfg(target_os = "macos")]
     {
+        // Re-add Pluks to the Accessibility list (via the OS prompt) before
+        // opening System Settings. If the user previously removed the entry,
+        // the panel would otherwise show a list that doesn't contain Pluks
+        // and there'd be no way to grant from here without the +/drag-in
+        // dance. The prompt also covers the fresh-install path.
+        let _ = request_accessibility();
         let _ = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             .spawn();
@@ -250,6 +257,10 @@ fn open_accessibility_settings() {
 fn open_input_monitoring_settings() {
     #[cfg(target_os = "macos")]
     {
+        // Same rationale as `open_accessibility_settings`: `IOHIDRequestAccess`
+        // re-adds Pluks to the Input Monitoring list and triggers the macOS
+        // prompt before we drop the user into System Settings.
+        let _ = request_input_monitoring();
         let _ = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
             .spawn();
