@@ -79,19 +79,22 @@ jobs:
           cache: "npm"
           cache-dependency-path: app/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      # See the matching comment in release.yml — the dtolnay action's
-      # default-toolchain step has been intermittently no-op'ing on the
-      # current windows-latest image, which makes `cargo check` resolve
-      # to rustup-init.exe and bomb with "unexpected argument 'check'".
-      # Re-pin and probe so the failure mode surfaces here, not deeper
-      # in the build.
-      - name: Pin default Rust toolchain (Windows image fix)
+      # See the long comment in release.yml. Same workaround: bootstrap
+      # rustup from scratch on Windows, then prepend ~/.cargo/bin to
+      # GITHUB_PATH so subsequent `cargo` calls hit the real shim
+      # instead of the runner image's broken rustup-init-as-cargo stub.
+      - name: Bootstrap Rust toolchain (Windows image workaround)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          rustup default stable
-          rustup show active-toolchain
-          cargo --version
+          $rustupInit = "$env:TEMP\rustup-init.exe"
+          Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
+          & $rustupInit --default-toolchain stable --profile minimal -y --quiet
+          if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with $LASTEXITCODE" }
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
+          & "$env:USERPROFILE\.cargo\bin\rustc.exe" --version
+          & "$env:USERPROFILE\.cargo\bin\rustup.exe" show active-toolchain
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
