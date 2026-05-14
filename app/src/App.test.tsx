@@ -19,6 +19,8 @@ function permissionHandler(opts: {
         crash_opt_out: false,
         analytics_first_seen_version: "0.0.0-test",
         last_seen_version: "0.0.0-test",
+        enable_long_press_paste: true,
+        show_nudges: true,
       };
     }
     return undefined;

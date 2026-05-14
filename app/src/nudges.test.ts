@@ -82,6 +82,40 @@ describe("decideAffirmation()", () => {
     expect(d.show).toBe(false);
     if (!d.show) expect(d.reason).toBe("decay_skip");
   });
+
+  // ── forceShow=true (driven by the `show_nudges` preference) ─────────────
+  //
+  // The runtime call site passes forceShow=true so the affirmation pill
+  // fires on *every* selection, bypassing AFFIRMATION_TIERS decay. We
+  // keep counters incrementing so corrective/hold-discovery gates that
+  // read `selects_total` continue to work.
+
+  it("forceShow=true fires on a single selection well past the decay horizon", () => {
+    for (let i = 0; i < 200; i++) decideAffirmation();
+    // Without forceShow this would return show:false / past_decay_horizon.
+    const d = decideAffirmation(true);
+    expect(d.show).toBe(true);
+    if (d.show) {
+      expect(d.kind).toBe("affirmation");
+      expect(d.selects).toBe(201);
+    }
+  });
+
+  it("forceShow=true fires every selection across a full decay cycle", () => {
+    let shown = 0;
+    for (let i = 0; i < 250; i++) {
+      if (decideAffirmation(true).show) shown++;
+    }
+    expect(shown).toBe(250);
+  });
+
+  it("forceShow=true still increments selects and affirmations counters", () => {
+    for (let i = 0; i < 30; i++) decideAffirmation(true);
+    const s = readStats();
+    expect(s.selects).toBe(30);
+    // All 30 fired → affirmations counter advances in lockstep.
+    expect(s.affirmationsShown).toBe(30);
+  });
 });
 
 describe("decideCorrective()", () => {

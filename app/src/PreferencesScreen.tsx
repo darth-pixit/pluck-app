@@ -6,6 +6,7 @@ import {
   setCrashOptOut,
   setLongPressEnabled,
   setOptOut,
+  setShowNudges,
   track,
   type Settings,
 } from "./analytics";
@@ -129,6 +130,12 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
     setSettings({ ...settings, enable_long_press_paste: enabled });
   };
 
+  const onToggleNudges = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = e.target.checked;
+    await setShowNudges(enabled);
+    setSettings({ ...settings, show_nudges: enabled });
+  };
+
   const onResetId = async () => {
     setResetting(true);
     await resetAnonymousId();
@@ -202,6 +209,21 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
             <span className="prefs-toggle-hint">
               Hold the mouse for half a second anywhere to open a wheel of
               recent clips. Drag to one, let go to paste.
+            </span>
+          </span>
+        </label>
+
+        <label className="prefs-toggle">
+          <input
+            type="checkbox"
+            checked={settings.show_nudges}
+            onChange={onToggleNudges}
+          />
+          <span className="prefs-toggle-label">
+            <strong>Show nudges</strong>
+            <span className="prefs-toggle-hint">
+              Flash a small confirmation near the cursor after each capture
+              and paste. Turn off if it feels too chatty.
             </span>
           </span>
         </label>

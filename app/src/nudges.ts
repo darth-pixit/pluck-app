@@ -113,12 +113,25 @@ export function readStats(): NudgeStats {
   };
 }
 
-/** Called on every successful Pluks capture (one per `new-selection` event). */
-export function decideAffirmation(): NudgeDecision {
+/**
+ * Called on every successful Pluks capture (one per `new-selection` event).
+ *
+ * `forceShow=true` skips the AFFIRMATION_TIERS decay so the pill fires on
+ * every selection — wired to the `show_nudges` preference (default on).
+ * The counter increment still happens unconditionally so suppression
+ * analytics, hold-discovery gating, and corrective ratios stay accurate
+ * regardless of how the user has the toggle set.
+ */
+export function decideAffirmation(forceShow: boolean = false): NudgeDecision {
   // Increment first — the decision uses the post-increment count so
   // "first 20" is genuinely captures 1–20, not 0–19.
   const selects = read(KEY_SELECTS) + 1;
   write(KEY_SELECTS, selects);
+
+  if (forceShow) {
+    write(KEY_AFFIRMATIONS, read(KEY_AFFIRMATIONS) + 1);
+    return { show: true, kind: "affirmation", text: "✦ Copied", selects };
+  }
 
   const tier = AFFIRMATION_TIERS.find(t => selects <= t.until);
   if (!tier) return { show: false, reason: "past_decay_horizon" };
