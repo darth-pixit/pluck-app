@@ -977,6 +977,86 @@ body.radial-body {
 .prefs-meta a { color: var(--accent-2); text-decoration: none; }
 .prefs-meta a:hover { text-decoration: underline; }
 
+/* System permissions list inside Preferences. Styled to read at a glance —
+   the green left-border / red left-border pattern echoes the macOS System
+   Settings privacy panes the user just came from. */
+.prefs-perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prefs-perm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  border-left-width: 3px;
+}
+.prefs-perm-row.granted {
+  border-left-color: rgba(52, 211, 153, 0.55);
+  background: rgba(52, 211, 153, 0.05);
+}
+.prefs-perm-row.missing {
+  border-left-color: rgba(252, 76, 2, 0.55);
+  background: rgba(252, 76, 2, 0.04);
+}
+.prefs-perm-row.loading {
+  border-left-color: var(--border);
+}
+.prefs-perm-body {
+  flex: 1;
+  min-width: 0;
+}
+.prefs-perm-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.prefs-perm-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.prefs-perm-status-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.prefs-perm-status {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.prefs-perm-row.granted .prefs-perm-status { color: #34D399; }
+.prefs-perm-row.missing .prefs-perm-status { color: var(--accent-2); }
+.prefs-perm-btn {
+  background: rgba(252, 76, 2, 0.18);
+  border: 1px solid rgba(252, 76, 2, 0.4);
+  border-radius: 6px;
+  color: var(--accent-2);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s;
+}
+.prefs-perm-btn:hover { background: rgba(252, 76, 2, 0.32); }
+.prefs-perm-hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+  opacity: 0.8;
+}
+
 /* ── Auto-update banner ───────────────────────────────────────────────── */
 .update-banner {
   margin: 8px 10px 0;
