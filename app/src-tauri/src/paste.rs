@@ -193,18 +193,22 @@ fn handle_event(
 }
 
 fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState {
+    eprintln!("[pluks] try_fire: at=({:.1},{:.1})", x, y);
     let cfg = settings::load_or_init(app);
     if !cfg.enable_long_press_paste {
+        eprintln!("[pluks] try_fire: suppressed disabled");
         emit_suppressed(app, "disabled");
         return FsmState::Disarmed;
     }
     if let Some(win) = app.get_webview_window(crate::WIN_HISTORY) {
         if win.is_visible().unwrap_or(false) {
+            eprintln!("[pluks] try_fire: suppressed panel_visible");
             emit_suppressed(app, "panel_visible");
             return FsmState::Disarmed;
         }
     }
     if focus_is_secure_field() {
+        eprintln!("[pluks] try_fire: suppressed secure_field");
         emit_suppressed(app, "secure_field");
         return FsmState::Disarmed;
     }
@@ -216,6 +220,7 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
         .take(SLICE_COUNT)
         .collect();
     if items.is_empty() {
+        eprintln!("[pluks] try_fire: suppressed empty_history");
         emit_suppressed(app, "empty_history");
         return FsmState::Disarmed;
     }
@@ -227,20 +232,32 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
     state.set_target_pid(target);
 
     let Some(win) = app.get_webview_window(WIN_RADIAL) else {
+        eprintln!("[pluks] try_fire: suppressed no_window");
         emit_suppressed(app, "no_window");
         return FsmState::Disarmed;
     };
-    let _ = win.set_position(LogicalPosition::new(
-        x - RADIAL_SIZE / 2.0,
-        y - RADIAL_SIZE / 2.0,
-    ));
-    let _ = win.set_size(LogicalSize::new(RADIAL_SIZE, RADIAL_SIZE));
-    let _ = win.show();
-
-    let _ = win.emit(
-        EVT_RADIAL_SHOW,
-        json!({ "items": items, "center": { "x": x, "y": y } }),
+    let pos_x = x - RADIAL_SIZE / 2.0;
+    let pos_y = y - RADIAL_SIZE / 2.0;
+    eprintln!(
+        "[pluks] try_fire: target=({:.1},{:.1}) size=({},{}) items={}",
+        pos_x, pos_y, RADIAL_SIZE, RADIAL_SIZE, items.len()
     );
+    if let Err(e) = win.set_position(LogicalPosition::new(pos_x, pos_y)) {
+        eprintln!("[pluks] try_fire: set_position failed: {:?}", e);
+    }
+    if let Err(e) = win.set_size(LogicalSize::new(RADIAL_SIZE, RADIAL_SIZE)) {
+        eprintln!("[pluks] try_fire: set_size failed: {:?}", e);
+    }
+    match win.show() {
+        Ok(()) => eprintln!("[pluks] try_fire: show() ok"),
+        Err(e) => eprintln!("[pluks] try_fire: show() failed: {:?}", e),
+    }
+
+    let payload = json!({ "items": items, "center": { "x": x, "y": y } });
+    match win.emit(EVT_RADIAL_SHOW, &payload) {
+        Ok(()) => eprintln!("[pluks] try_fire: emit({}) ok", EVT_RADIAL_SHOW),
+        Err(e) => eprintln!("[pluks] try_fire: emit failed: {:?}", e),
+    }
 
     FsmState::Fired {
         center_x: x,
