@@ -129,6 +129,23 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # Belt-and-suspenders for the current windows-latest runner image:
+      # `dtolnay/rust-toolchain@stable`'s own `rustup default stable` step
+      # has been intermittently no-op'ing on Windows, leaving the `cargo`
+      # shim to bottom out into rustup-init.exe — subsequent cargo
+      # invocations then fail with rustup-init's argparse error
+      # ("unexpected argument 'check'", etc.) and the matrix entry dies.
+      # Re-pin the default here and probe before the build runs, so the
+      # failure surfaces inside this step rather than three steps later
+      # in tauri-action with a confusing message.
+      - name: Pin default Rust toolchain (Windows image fix)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
