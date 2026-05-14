@@ -7,7 +7,7 @@ import PreferencesScreen from "./PreferencesScreen";
 import UpdateBanner from "./UpdateBanner";
 import ActivationTour, { shouldShowActivationTour } from "./ActivationTour";
 import { startUpdater } from "./updater";
-import { bucket, safeInvoke, track } from "./analytics";
+import { bucket, nudgesEnabled, safeInvoke, track } from "./analytics";
 import {
   decideAffirmation,
   decideCorrective,
@@ -379,10 +379,22 @@ export default function App() {
   // the new-selection (affirmation), manual-copy (corrective), and
   // radial-paste (pasted_via_hold / hold_discovery) paths so every branch
   // emits the same observability shape in PostHog.
+  //
+  // The user-facing `show_nudges` preference is the master kill-switch:
+  // when off, *every* nudge surface is suppressed (with a `user_pref_off`
+  // reason so the funnel still records the intent). When on, individual
+  // decisions still get to bail for their own reasons (decay, cooldown,
+  // baseline) — but the affirmation path now passes forceShow=true at
+  // its decision site so it fires on every selection regardless of
+  // decay. See `useEffect` that listens to `new-selection`.
   const runNudge = useCallback((
     decision: NudgeDecision,
     kind: "affirmation" | "corrective" | "pasted_via_hold" | "hold_discovery",
   ) => {
+    if (!nudgesEnabled()) {
+      track("nudge_suppressed", { kind, reason: "user_pref_off" });
+      return;
+    }
     if (decision.show) {
       safeInvoke("show_nudge", { kind: decision.kind, text: decision.text }).catch(() => {});
       track("nudge_shown", {
@@ -403,7 +415,11 @@ export default function App() {
         const filtered = prev.filter(i => i.id !== event.payload.id);
         return [event.payload, ...filtered].slice(0, 100);
       });
-      const aff = decideAffirmation();
+      // forceShow=true → bypass AFFIRMATION_TIERS decay so the pill fires
+      // on every selection. Gated by the `show_nudges` preference inside
+      // runNudge; when the user turns nudges off, this branch becomes a
+      // no-op (with `user_pref_off` analytics).
+      const aff = decideAffirmation(nudgesEnabled());
       runNudge(aff, "affirmation");
       // Discovery nudge runs only when the affirmation is suppressed, so
       // two nudges never overlap in the same render frame. The decay logic

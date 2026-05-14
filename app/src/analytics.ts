@@ -118,6 +118,7 @@ export interface Settings {
   analytics_first_seen_version: string;
   last_seen_version: string;
   enable_long_press_paste: boolean;
+  show_nudges: boolean;
 }
 
 let _settings: Settings | null = null;
@@ -206,6 +207,7 @@ export async function initAnalytics(): Promise<void> {
       analytics_first_seen_version: APP_VERSION,
       last_seen_version: APP_VERSION,
       enable_long_press_paste: true,
+      show_nudges: true,
     };
   }
 
@@ -323,6 +325,26 @@ export async function setLongPressEnabled(enabled: boolean): Promise<void> {
   _settings.enable_long_press_paste = enabled;
   track("long_press_paste_toggled", { enabled });
   try { await invoke("set_settings", { settings: _settings }); } catch {}
+}
+
+export async function setShowNudges(enabled: boolean): Promise<void> {
+  if (!_settings) return;
+  if (_settings.show_nudges === enabled) return;
+  _settings.show_nudges = enabled;
+  // No telemetry event — we don't want a schema bump just for this; the
+  // setting is small and the analytics surface is already busy. Adding
+  // one later is straightforward if we ever want the funnel.
+  try { await invoke("set_settings", { settings: _settings }); } catch {}
+}
+
+/**
+ * Live accessor used by the hot path that fires on every selection. Avoids
+ * the cost of plumbing settings through React state — `_settings` is the
+ * source of truth, mutated by the `set*` helpers and persisted to disk
+ * asynchronously.
+ */
+export function nudgesEnabled(): boolean {
+  return !!_settings?.show_nudges;
 }
 
 export function getSettings(): Settings | null {

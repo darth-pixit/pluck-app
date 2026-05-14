@@ -4,7 +4,11 @@ import PreferencesScreen from "./PreferencesScreen";
 import { initAnalytics } from "./analytics";
 import { setInvokeHandler } from "./__tests__/setup";
 
-async function bootstrap(initial: { opt_out?: boolean; crash_opt_out?: boolean } = {}) {
+async function bootstrap(initial: {
+  opt_out?: boolean;
+  crash_opt_out?: boolean;
+  show_nudges?: boolean;
+} = {}) {
   setInvokeHandler((cmd) => {
     if (cmd === "get_settings") {
       return {
@@ -13,6 +17,8 @@ async function bootstrap(initial: { opt_out?: boolean; crash_opt_out?: boolean }
         crash_opt_out: initial.crash_opt_out ?? false,
         analytics_first_seen_version: "0.0.0-test",
         last_seen_version: "0.0.0-test",
+        enable_long_press_paste: true,
+        show_nudges: initial.show_nudges ?? true,
       };
     }
     if (cmd === "set_settings") return true;
@@ -70,6 +76,22 @@ describe("PreferencesScreen", () => {
     await bootstrap();
     render(<PreferencesScreen onClose={() => {}} />);
     expect(screen.getByText(/Password fields are skipped automatically/i)).toBeInTheDocument();
+  });
+
+  it("renders the Show nudges toggle and reflects initial state", async () => {
+    await bootstrap({ show_nudges: true });
+    render(<PreferencesScreen onClose={() => {}} />);
+    const checkbox = screen.getByLabelText(/Show nudges/i) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
+
+  it("toggling 'Show nudges' off persists show_nudges=false", async () => {
+    await bootstrap({ show_nudges: true });
+    render(<PreferencesScreen onClose={() => {}} />);
+    const checkbox = screen.getByLabelText(/Show nudges/i) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(false));
   });
 
   it("calls onClose handler exists (smoke)", async () => {

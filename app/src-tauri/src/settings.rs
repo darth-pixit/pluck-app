@@ -29,6 +29,18 @@ pub struct Settings {
     /// which would silently flip them to false on upgrade.
     #[serde(default = "default_true")]
     pub enable_long_press_paste: bool,
+    /// Show the small floating "nudge" pill near the cursor after every
+    /// auto-copy capture (and the analogous paste-side surfaces). On by
+    /// default. When on, the affirmation fires on *every* selection — no
+    /// adaptive decay — so the user (and we, during diagnostics on macOS
+    /// builds where transparent overlay rendering changed under us — Tahoe
+    /// 26.2 et al.) can verify the overlay pipeline is producing pixels at
+    /// all. When off, every nudge surface is suppressed: affirmation,
+    /// corrective, hold-affirmation, hold-discovery. Same `default_true`
+    /// upgrade dance as `enable_long_press_paste` so pre-feature records
+    /// don't silently flip to off.
+    #[serde(default = "default_true")]
+    pub show_nudges: bool,
 }
 
 fn default_true() -> bool { true }
@@ -42,6 +54,7 @@ impl Settings {
             analytics_first_seen_version: String::new(),
             last_seen_version: String::new(),
             enable_long_press_paste: true,
+            show_nudges: true,
         }
     }
 }
@@ -233,10 +246,17 @@ mod tests {
         // matching the new-install default. A serde `default` would have
         // landed at `false` and silently disabled the feature.
         assert!(s.enable_long_press_paste);
+        // Same upgrade guarantee for the nudge toggle.
+        assert!(s.show_nudges);
     }
 
     #[test]
     fn fresh_enables_long_press_paste() {
         assert!(Settings::fresh().enable_long_press_paste);
+    }
+
+    #[test]
+    fn fresh_enables_nudges() {
+        assert!(Settings::fresh().show_nudges);
     }
 }
