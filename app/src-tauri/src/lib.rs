@@ -202,12 +202,8 @@ fn check_accessibility() -> bool {
     ax_is_trusted()
 }
 
-/// DEV-only diagnostic forwarder. Tauri webview `console.log` output goes to
-/// each window's own DevTools, not to the `tauri dev` terminal — and the
-/// nudge + radial overlay windows are click-through transparent panels you
-/// can't easily right-click to open DevTools on. So instead, the React
-/// probes call this command, and we eprintln from Rust into the terminal
-/// where the user is already watching `[pluks]` logs.
+/// DEV-only forwarder so the click-through overlay windows (no openable
+/// DevTools) can route console output to the `tauri dev` terminal.
 #[tauri::command]
 fn diag_log(msg: String) {
     eprintln!("[pluks][js] {}", msg);

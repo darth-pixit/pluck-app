@@ -87,16 +87,9 @@ export default function RadialMenu() {
   const [evtCount, setEvtCount] = useState(0);
 
   useEffect(() => {
-    if (DEV) {
-      // Forwarded to the `tauri dev` terminal via Rust `diag_log`. Webview
-      // console.log only reaches this window's own DevTools, which is
-      // impractical to open on a click-through transparent panel.
-      diagLog(`[radial-menu] mounted hash=${JSON.stringify(window.location.hash)}`);
-    }
+    if (DEV) diagLog(`[radial-menu] mounted hash=${JSON.stringify(window.location.hash)}`);
     const unShow = listen<ShowPayload>("radial-show", evt => {
-      if (DEV) {
-        diagLog(`[radial-menu] received radial-show items=${evt.payload.items?.length}`);
-      }
+      if (DEV) diagLog(`[radial-menu] received radial-show items=${evt.payload.items?.length}`);
       setEvtCount(c => c + 1);
       setItems(evt.payload.items.slice(0, SLICE_COUNT));
       setActive(-1);
@@ -106,15 +99,11 @@ export default function RadialMenu() {
       setActive(evt.payload.inside ? evt.payload.index : -1);
     });
     const unHide = listen("radial-hide", () => {
-      if (DEV) {
-        diagLog("[radial-menu] received radial-hide");
-      }
+      if (DEV) diagLog("[radial-menu] received radial-hide");
       setVisible(false);
       setActive(-1);
     });
     if (DEV) {
-      // Confirm each listen() actually registered. Distinguishes "listener
-      // never attached" from "attached but no event arrived".
       unShow.then(() => diagLog("[radial-menu] listen(radial-show) registered"))
         .catch(e => diagLog(`[radial-menu] listen(radial-show) FAILED: ${String(e)}`));
       unHigh.then(() => diagLog("[radial-menu] listen(radial-highlight) registered"))

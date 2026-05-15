@@ -24,11 +24,6 @@ const isOverlay = isNudgeWindow || isRadialWindow;
 // This log makes the actual hash visible per window so we can rule that in
 // or out without inspecting devtools.
 if (import.meta.env.DEV) {
-  // Forwarded to Rust via the `diag_log` Tauri command so the line shows
-  // up in the same `tauri dev` terminal as the `[pluks]` Rust eprintln
-  // output. Webview console.log can't reach that terminal directly, and
-  // the click-through overlay windows can't be right-clicked to open
-  // their DevTools.
   diagLog(
     `[main.tsx] mounting hash=${JSON.stringify(hash)} ` +
     `isNudge=${isNudgeWindow} isRadial=${isRadialWindow} isOverlay=${isOverlay}`,

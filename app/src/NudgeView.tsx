@@ -31,25 +31,13 @@ export default function NudgeView() {
   const [evtCount, setEvtCount] = useState(0);
 
   useEffect(() => {
-    if (DEV) {
-      // Forwarded to the `tauri dev` terminal via the Rust `diag_log`
-      // command (see analytics.diagLog). Webview console.log only reaches
-      // this window's own DevTools, which we can't open on a click-through
-      // transparent panel. If main.tsx's hash routing failed, App.tsx
-      // would mount here instead and we'd never see this line.
-      diagLog(`[nudge-view] mounted hash=${JSON.stringify(window.location.hash)}`);
-    }
+    if (DEV) diagLog(`[nudge-view] mounted hash=${JSON.stringify(window.location.hash)}`);
     const un = listen<ShowPayload>("nudge-show", evt => {
-      if (DEV) {
-        diagLog(`[nudge-view] received nudge-show kind=${evt.payload.kind}`);
-      }
+      if (DEV) diagLog(`[nudge-view] received nudge-show kind=${evt.payload.kind}`);
       setEvtCount(c => c + 1);
       setShown(evt.payload);
     });
     if (DEV) {
-      // Confirm listen() actually registered (its returned promise resolves)
-      // — answers the "did the listener attach at all?" question separately
-      // from "did any event reach the listener?".
       un.then(() => diagLog("[nudge-view] listen(nudge-show) registered"))
         .catch(e => diagLog(`[nudge-view] listen(nudge-show) FAILED: ${String(e)}`));
     }
