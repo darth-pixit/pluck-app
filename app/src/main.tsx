@@ -16,6 +16,24 @@ const isNudgeWindow = hash === "#nudge";
 const isRadialWindow = hash === "#radial";
 const isOverlay = isNudgeWindow || isRadialWindow;
 
+// DEV-only diagnostic: surface which window this bundle is mounting in.
+// If the v0.4.5 logs show `show_nudge: emit(nudge-show) ok` but the nudge
+// is invisible, the most likely cause is hash routing landing the wrong
+// component in the nudge window (App.tsx mounts → no nudge-show listener
+// → state never flips → transparent window with no opaque content).
+// This log makes the actual hash visible per window so we can rule that in
+// or out without inspecting devtools.
+if (import.meta.env.DEV) {
+  // eslint-disable-next-line no-console
+  console.log(
+    "[main.tsx] mounting hash=",
+    JSON.stringify(hash),
+    "isNudge=", isNudgeWindow,
+    "isRadial=", isRadialWindow,
+    "isOverlay=", isOverlay,
+  );
+}
+
 // Fire-and-forget — analytics must never block the UI from rendering.
 // Skipped in overlay windows: those are passive views that issue no events.
 if (!isOverlay) initAnalytics();
