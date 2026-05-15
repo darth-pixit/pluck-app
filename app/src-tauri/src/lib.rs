@@ -87,9 +87,16 @@ const PASTE_WATCH_TICK_MS: u64 = 15;
 
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
+const TRAY_TEST_NUDGE: &str = "test_nudge";
+const TRAY_TEST_RADIAL: &str = "test_radial";
 const TRAY_QUIT: &str = "quit";
 const TRAY_LABEL_DISABLE: &str = "Disable Auto-Copy";
 const TRAY_LABEL_ENABLE: &str = "Enable Auto-Copy";
+
+// Test radial menu auto-dismisses itself after this long. Long enough for
+// the user to register the visual, short enough to clear quickly if it's
+// rendered somewhere unexpected (e.g. behind another window).
+const TEST_RADIAL_LIFETIME_MS: u64 = 3000;
 
 // ── Shared app state ──────────────────────────────────────────────────────────
 
@@ -203,21 +210,42 @@ fn check_accessibility() -> bool {
 /// window out from under the new nudge.
 #[tauri::command]
 fn show_nudge(app: AppHandle, state: State<Arc<AppState>>, kind: String, text: String) {
+    show_nudge_impl(&app, &state, &kind, &text);
+}
+
+/// Inner implementation shared between the public `show_nudge` Tauri command
+/// and the tray "Test Nudge" diagnostic action. Every step is logged via
+/// `eprintln!` so the v0.4.5 diagnostic build surfaces exactly which point of
+/// the pipeline succeeds and which fails — visible in Console.app under
+/// "Pluks". Filter with: `process == "Pluks" && message CONTAINS "[pluks]"`.
+fn show_nudge_impl(app: &AppHandle, state: &Arc<AppState>, kind: &str, text: &str) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
+        eprintln!("[pluks] show_nudge: WIN_NUDGE not found");
         return;
     };
     let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let (cx, cy) = cursor_pos();
-    let _ = win.set_position(tauri::LogicalPosition::new(
-        cx + NUDGE_OFFSET_X,
-        cy + NUDGE_OFFSET_Y,
-    ));
-    let _ = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT));
-    let _ = win.show();
-    let _ = win.emit(
-        EVT_NUDGE_SHOW,
-        serde_json::json!({ "kind": kind, "text": text }),
+    let pos_x = cx + NUDGE_OFFSET_X;
+    let pos_y = cy + NUDGE_OFFSET_Y;
+    eprintln!(
+        "[pluks] show_nudge: gen={} kind={} cursor=({:.1},{:.1}) target=({:.1},{:.1}) size=({},{})",
+        my_gen, kind, cx, cy, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT
     );
+    if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
+        eprintln!("[pluks] show_nudge: set_position failed: {:?}", e);
+    }
+    if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
+        eprintln!("[pluks] show_nudge: set_size failed: {:?}", e);
+    }
+    match win.show() {
+        Ok(()) => eprintln!("[pluks] show_nudge: show() ok"),
+        Err(e) => eprintln!("[pluks] show_nudge: show() failed: {:?}", e),
+    }
+    let payload = serde_json::json!({ "kind": kind, "text": text });
+    match win.emit(EVT_NUDGE_SHOW, &payload) {
+        Ok(()) => eprintln!("[pluks] show_nudge: emit({}) ok", EVT_NUDGE_SHOW),
+        Err(e) => eprintln!("[pluks] show_nudge: emit failed: {:?}", e),
+    }
 
     let app_for_hide = app.clone();
     let gen_arc = state.nudge_gen.clone();
@@ -228,6 +256,69 @@ fn show_nudge(app: AppHandle, state: State<Arc<AppState>>, kind: String, text: S
         }
         if let Some(w) = app_for_hide.get_webview_window(WIN_NUDGE) {
             let _ = w.hide();
+        }
+    });
+}
+
+/// Pop the radial menu with synthetic placeholder items, bypassing the
+/// long-press FSM entirely. Wired to the tray "Test Radial" diagnostic so
+/// the user can verify radial visibility on macOS Tahoe without having to
+/// reproduce the hold-still gesture. Emits the same `radial-show` /
+/// `radial-hide` events the real path emits, so RadialMenu.tsx renders
+/// identically. FSM stays in Idle the whole time — there is no commit on
+/// release; the radial auto-hides after TEST_RADIAL_LIFETIME_MS.
+fn show_test_radial_impl(app: &AppHandle) {
+    let Some(win) = app.get_webview_window(paste::WIN_RADIAL) else {
+        eprintln!("[pluks] test_radial: WIN_RADIAL not found");
+        return;
+    };
+    let (cx, cy) = cursor_pos();
+    const RADIAL_SIZE: f64 = 260.0;
+    let pos_x = cx - RADIAL_SIZE / 2.0;
+    let pos_y = cy - RADIAL_SIZE / 2.0;
+    eprintln!(
+        "[pluks] test_radial: cursor=({:.1},{:.1}) target=({:.1},{:.1}) size=({},{})",
+        cx, cy, pos_x, pos_y, RADIAL_SIZE, RADIAL_SIZE
+    );
+
+    let now = "2026-05-14T00:00:00Z";
+    let items: Vec<serde_json::Value> = (1..=paste::SLICE_COUNT)
+        .map(|i| serde_json::json!({
+            "id": i as i64,
+            "content": format!("Test slice {}", i),
+            "copied_at": now,
+            "char_count": 13_i32,
+        }))
+        .collect();
+
+    if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
+        eprintln!("[pluks] test_radial: set_position failed: {:?}", e);
+    }
+    if let Err(e) = win.set_size(tauri::LogicalSize::new(RADIAL_SIZE, RADIAL_SIZE)) {
+        eprintln!("[pluks] test_radial: set_size failed: {:?}", e);
+    }
+    match win.show() {
+        Ok(()) => eprintln!("[pluks] test_radial: show() ok"),
+        Err(e) => eprintln!("[pluks] test_radial: show() failed: {:?}", e),
+    }
+    let payload = serde_json::json!({
+        "items": items,
+        "center": { "x": cx, "y": cy },
+    });
+    match win.emit("radial-show", &payload) {
+        Ok(()) => eprintln!("[pluks] test_radial: emit(radial-show) ok"),
+        Err(e) => eprintln!("[pluks] test_radial: emit failed: {:?}", e),
+    }
+
+    let app_for_hide = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(TEST_RADIAL_LIFETIME_MS));
+        if let Some(w) = app_for_hide.get_webview_window(paste::WIN_RADIAL) {
+            let _ = w.hide();
+            let _ = w.emit(
+                "radial-hide",
+                serde_json::json!({ "reason": "test_timeout" }),
+            );
         }
     });
 }
@@ -343,7 +434,7 @@ unsafe fn pluks_panel_class() -> *mut objc2::runtime::AnyObject {
 /// One-time native window tweaks so the panel overlays correctly — including
 /// over other apps' full-screen Spaces, while still receiving keyboard input.
 #[cfg(target_os = "macos")]
-fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
+fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bool) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -353,21 +444,41 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
 
     // CanJoinAllSpaces | FullScreenAuxiliary | Transient | Stationary | IgnoresCycle
     const COLLECTION: u64 = (1 << 0) | (1 << 8) | (1 << 3) | (1 << 4) | (1 << 6);
+    // History panel sits at NSScreenSaverWindowLevel so it can float over other
+    // apps' full-screen Spaces. The transient overlay windows (nudge + radial)
+    // drop to NSPopUpMenuWindowLevel — Tahoe 26.x has been observed to silently
+    // demote/clip windows in the screen-saver band for unentitled apps, and
+    // pop-up menu level still puts us above any normal foreground app content
+    // while staying well clear of the restricted band.
     const SCREENSAVER_LEVEL: isize = 1000;
+    const POPUP_MENU_LEVEL: isize = 101;
     const NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL: u64 = 1 << 7;
+    // Tahoe's compositor has been observed to skip windows whose style mask
+    // carries only NonactivatingPanel and no "content" bit. Adding
+    // FullSizeContentView gives the WKWebView content layer a recognized
+    // owner without affecting layout (we have decorations: false anyway).
+    const NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW: u64 = 1 << 15;
 
     unsafe {
-        // Swap class to our PluksPanel subclass that can become key.
-        let cls = pluks_panel_class();
-        if !cls.is_null() {
-            object_setClass(ns, cls);
+        // The PluksPanel subclass is only needed for windows that must become
+        // key (the history panel — keyboard input). The class swap via
+        // object_setClass is fragile under Tahoe and unnecessary for
+        // click-through ambient surfaces, so skip it for nudge + radial.
+        if needs_key {
+            let cls = pluks_panel_class();
+            if !cls.is_null() {
+                object_setClass(ns, cls);
+            }
         }
 
         let current_mask: u64 = msg_send![ns, styleMask];
-        let new_mask = current_mask | NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL;
+        let new_mask = current_mask
+            | NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL
+            | NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW;
         let _: () = msg_send![ns, setStyleMask: new_mask];
 
-        let _: () = msg_send![ns, setLevel: SCREENSAVER_LEVEL];
+        let level: isize = if needs_key { SCREENSAVER_LEVEL } else { POPUP_MENU_LEVEL };
+        let _: () = msg_send![ns, setLevel: level];
         let _: () = msg_send![ns, setCollectionBehavior: COLLECTION];
         let _: () = msg_send![ns, setHidesOnDeactivate: false];
         let _: () = msg_send![ns, setMovableByWindowBackground: true];
@@ -407,7 +518,10 @@ fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
 //   - Win32 doesn't have macOS's per-Space "join all spaces" concept;
 //     alwaysOnTop is the closest equivalent.
 #[cfg(not(target_os = "macos"))]
-fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
+fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, _needs_key: bool) {
+    // The needs_key parameter is macOS-only (controls the NSPanel subclass
+    // swap that lets the history panel receive keyboard input). On
+    // Windows/Linux every overlay is a normal always-on-top window.
     let _ = window.set_always_on_top(true);
     let _ = window.set_skip_taskbar(true);
 }
@@ -610,6 +724,15 @@ fn start_manual_copy_processor(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Surface the version in Console.app so the user can confirm which
+    // build is actually running — important for the v0.4.5 diagnostic
+    // build that's being shipped to disambiguate the Tahoe 26.2 overlay
+    // visibility bug.
+    eprintln!(
+        "[pluks] starting v{} (overlay diagnostics enabled)",
+        env!("CARGO_PKG_VERSION")
+    );
+
     tauri::Builder::default()
         // The MacosLauncher arg only takes effect on macOS — on Windows the
         // plugin writes a registry Run entry, on Linux it drops a .desktop
@@ -644,27 +767,30 @@ pub fn run() {
             }
 
             // Configure the history window as a floating overlay panel.
+            // needs_key=true → PluksPanel subclass + NSScreenSaverWindowLevel
+            // so it floats over other apps' full-screen Spaces AND receives
+            // keyboard input.
             if let Some(win) = app.get_webview_window(WIN_HISTORY) {
-                configure_overlay_window(&win);
+                configure_overlay_window(&win, true);
             }
 
-            // Configure the nudge window: same overlay treatment so it
-            // floats over every Space + full-screen, plus click-through
-            // so the user can never accidentally interact with it. We
-            // explicitly do NOT call makeKey on it — nudges must never
-            // steal focus from whatever the user is typing in.
+            // Configure the nudge window: needs_key=false → skip the
+            // class swap (nudges must never steal focus from whatever the
+            // user is typing in anyway) and drop to NSPopUpMenuWindowLevel
+            // so Tahoe doesn't demote/clip us in the restricted
+            // screen-saver band. Click-through so the user can never
+            // accidentally interact with it.
             if let Some(win) = app.get_webview_window(WIN_NUDGE) {
-                configure_overlay_window(&win);
+                configure_overlay_window(&win, false);
                 let _ = win.set_ignore_cursor_events(true);
             }
 
-            // Configure the radial paste window. Same overlay treatment
-            // (floats over Spaces, never activates) and also click-through:
-            // the in-flight mouse-down belongs to the underlying app, and
-            // all radial input is driven by `paste.rs` reading the global
-            // event tap directly — the window is a pure visual surface.
+            // Configure the radial paste window. Same needs_key=false
+            // treatment as the nudge: pure visual surface, no keyboard
+            // input, click-through (all radial input is driven by
+            // paste.rs reading the global event tap directly).
             if let Some(win) = app.get_webview_window(paste::WIN_RADIAL) {
-                configure_overlay_window(&win);
+                configure_overlay_window(&win, false);
                 let _ = win.set_ignore_cursor_events(true);
             }
 
@@ -696,8 +822,35 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            // Diagnostic actions (v0.4.5). These bypass the gesture / capture
+            // pipeline and fire the overlay show paths directly so the user
+            // can verify whether nudge + radial actually render — independent
+            // of whether a real selection ever made it through capture.
+            let test_nudge_item = MenuItem::with_id(
+                app,
+                TRAY_TEST_NUDGE,
+                "Test Nudge (debug)",
+                true,
+                None::<&str>,
+            )?;
+            let test_radial_item = MenuItem::with_id(
+                app,
+                TRAY_TEST_RADIAL,
+                "Test Radial Menu (debug)",
+                true,
+                None::<&str>,
+            )?;
             let quit_item = MenuItem::with_id(app, TRAY_QUIT, "Quit Pluks", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toggle_item, &history_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &toggle_item,
+                    &history_item,
+                    &test_nudge_item,
+                    &test_radial_item,
+                    &quit_item,
+                ],
+            )?;
 
             let _ = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -719,6 +872,19 @@ pub fn run() {
                             });
                         }
                         TRAY_HISTORY => toggle_history_window(&app_handle, false),
+                        TRAY_TEST_NUDGE => {
+                            eprintln!("[pluks] tray: TEST_NUDGE clicked");
+                            show_nudge_impl(
+                                &app_handle,
+                                &state_ref,
+                                "affirmation",
+                                "✦ Test nudge",
+                            );
+                        }
+                        TRAY_TEST_RADIAL => {
+                            eprintln!("[pluks] tray: TEST_RADIAL clicked");
+                            show_test_radial_impl(&app_handle);
+                        }
                         TRAY_QUIT => {
                             // Give the frontend a chance to install a staged
                             // update before we tear down. The listener has up
