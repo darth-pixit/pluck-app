@@ -24,10 +24,11 @@ use tauri::{
 };
 
 pub(crate) const WIN_HISTORY: &str = "history";
-const WIN_NUDGE: &str = "nudge";
+pub(crate) const WIN_NUDGE: &str = "nudge";
 const EVT_NEW_SELECTION: &str = "new-selection";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
 const EVT_NUDGE_SHOW: &str = "nudge-show";
+const EVT_PASTE_CONFIRM: &str = "paste-confirm";
 
 // How far down + right of the cursor the nudge floats. Big enough that
 // the user's hand doesn't obscure it; small enough that it reads as
@@ -88,15 +89,20 @@ const PASTE_WATCH_TICK_MS: u64 = 15;
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
 const TRAY_TEST_NUDGE: &str = "test_nudge";
-const TRAY_TEST_RADIAL: &str = "test_radial";
+const TRAY_TEST_PASTE_CONFIRM: &str = "test_paste_confirm";
 const TRAY_QUIT: &str = "quit";
 const TRAY_LABEL_DISABLE: &str = "Disable Auto-Copy";
 const TRAY_LABEL_ENABLE: &str = "Enable Auto-Copy";
 
-// Test radial menu auto-dismisses itself after this long. Long enough for
-// the user to register the visual, short enough to clear quickly if it's
-// rendered somewhere unexpected (e.g. behind another window).
-const TEST_RADIAL_LIFETIME_MS: u64 = 3000;
+// How long the silent-paste confirmation pill stays on screen. Matches the
+// fade-in + hold + fade-out timing in the `.paste-confirm-pill` CSS keyframes
+// so the React component unmounts at the same moment the window is hidden.
+const PASTE_CONFIRM_LIFETIME_MS: u64 = 2350;
+// How far the pill is offset from the press point. Negative X nudges the
+// leading dot a few px left of the cursor so the pill reads as a label
+// trailing the click; positive Y drops it just below the cursor.
+const PASTE_CONFIRM_OFFSET_X: f64 = 12.0;
+const PASTE_CONFIRM_OFFSET_Y: f64 = 18.0;
 
 // ── Shared app state ──────────────────────────────────────────────────────────
 
@@ -214,111 +220,96 @@ fn show_nudge(app: AppHandle, state: State<Arc<AppState>>, kind: String, text: S
 }
 
 /// Inner implementation shared between the public `show_nudge` Tauri command
-/// and the tray "Test Nudge" diagnostic action. Every step is logged via
-/// `eprintln!` so the v0.4.5 diagnostic build surfaces exactly which point of
-/// the pipeline succeeds and which fails — visible in Console.app under
-/// "Pluks". Filter with: `process == "Pluks" && message CONTAINS "[pluks]"`.
+/// and the tray "Test Nudge" diagnostic action.
 fn show_nudge_impl(app: &AppHandle, state: &Arc<AppState>, kind: &str, text: &str) {
+    let (cx, cy) = cursor_pos();
+    show_in_nudge_window(
+        app,
+        state,
+        cx + NUDGE_OFFSET_X,
+        cy + NUDGE_OFFSET_Y,
+        EVT_NUDGE_SHOW,
+        serde_json::json!({ "kind": kind, "text": text }),
+        NUDGE_LIFETIME_MS,
+        "show_nudge",
+    );
+}
+
+/// Anchor the nudge window at the press point and broadcast a
+/// `paste-confirm` event. The pill is rendered by `NudgeView`; App.tsx
+/// also listens on the broadcast for analytics + the hold-discovery
+/// counter bump.
+pub(crate) fn show_paste_confirm(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    x: f64,
+    y: f64,
+    char_count: usize,
+) {
+    show_in_nudge_window(
+        app,
+        state,
+        x - PASTE_CONFIRM_OFFSET_X,
+        y + PASTE_CONFIRM_OFFSET_Y,
+        EVT_PASTE_CONFIRM,
+        serde_json::json!({ "x": x, "y": y, "char_count": char_count }),
+        PASTE_CONFIRM_LIFETIME_MS,
+        "show_paste_confirm",
+    );
+}
+
+/// Position + show the nudge window, broadcast `event` with `payload`,
+/// and schedule a hide after `lifetime_ms`. The generation counter
+/// guarantees a follow-up call within the lifetime window leaves the
+/// in-flight pill on screen instead of being yanked by the prior hide
+/// task. Every step is logged via `eprintln!` so the v0.4.5 diagnostic
+/// build surfaces which point of the pipeline succeeds and which fails
+/// — visible in Console.app under "Pluks". Filter with:
+/// `process == "Pluks" && message CONTAINS "[pluks]"`.
+fn show_in_nudge_window(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    pos_x: f64,
+    pos_y: f64,
+    event: &str,
+    payload: serde_json::Value,
+    lifetime_ms: u64,
+    log_tag: &str,
+) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
-        eprintln!("[pluks] show_nudge: WIN_NUDGE not found");
+        eprintln!("[pluks] {}: WIN_NUDGE not found", log_tag);
         return;
     };
     let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    let (cx, cy) = cursor_pos();
-    let pos_x = cx + NUDGE_OFFSET_X;
-    let pos_y = cy + NUDGE_OFFSET_Y;
     eprintln!(
-        "[pluks] show_nudge: gen={} kind={} cursor=({:.1},{:.1}) target=({:.1},{:.1}) size=({},{})",
-        my_gen, kind, cx, cy, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT
+        "[pluks] {}: gen={} target=({:.1},{:.1}) size=({},{}) event={}",
+        log_tag, my_gen, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT, event,
     );
     if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] show_nudge: set_position failed: {:?}", e);
+        eprintln!("[pluks] {}: set_position failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
-        eprintln!("[pluks] show_nudge: set_size failed: {:?}", e);
+        eprintln!("[pluks] {}: set_size failed: {:?}", log_tag, e);
     }
-    match win.show() {
-        Ok(()) => eprintln!("[pluks] show_nudge: show() ok"),
-        Err(e) => eprintln!("[pluks] show_nudge: show() failed: {:?}", e),
+    if let Err(e) = win.show() {
+        eprintln!("[pluks] {}: show() failed: {:?}", log_tag, e);
     }
-    let payload = serde_json::json!({ "kind": kind, "text": text });
-    match win.emit(EVT_NUDGE_SHOW, &payload) {
-        Ok(()) => eprintln!("[pluks] show_nudge: emit({}) ok", EVT_NUDGE_SHOW),
-        Err(e) => eprintln!("[pluks] show_nudge: emit failed: {:?}", e),
+    // Broadcast — App.tsx in the history window may need to listen too
+    // (paste-confirm), and listeners in the nudge webview itself also
+    // receive broadcasts.
+    if let Err(e) = app.emit(event, &payload) {
+        eprintln!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
     }
 
     let app_for_hide = app.clone();
     let gen_arc = state.nudge_gen.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(NUDGE_LIFETIME_MS));
+        thread::sleep(Duration::from_millis(lifetime_ms));
         if gen_arc.load(Ordering::SeqCst) != my_gen {
             return;
         }
         if let Some(w) = app_for_hide.get_webview_window(WIN_NUDGE) {
             let _ = w.hide();
-        }
-    });
-}
-
-/// Pop the radial menu with synthetic placeholder items, bypassing the
-/// long-press FSM entirely. Wired to the tray "Test Radial" diagnostic so
-/// the user can verify radial visibility on macOS Tahoe without having to
-/// reproduce the hold-still gesture. Emits the same `radial-show` /
-/// `radial-hide` events the real path emits, so RadialMenu.tsx renders
-/// identically. FSM stays in Idle the whole time — there is no commit on
-/// release; the radial auto-hides after TEST_RADIAL_LIFETIME_MS.
-fn show_test_radial_impl(app: &AppHandle) {
-    let Some(win) = app.get_webview_window(paste::WIN_RADIAL) else {
-        eprintln!("[pluks] test_radial: WIN_RADIAL not found");
-        return;
-    };
-    let (cx, cy) = cursor_pos();
-    const RADIAL_SIZE: f64 = 260.0;
-    let pos_x = cx - RADIAL_SIZE / 2.0;
-    let pos_y = cy - RADIAL_SIZE / 2.0;
-    eprintln!(
-        "[pluks] test_radial: cursor=({:.1},{:.1}) target=({:.1},{:.1}) size=({},{})",
-        cx, cy, pos_x, pos_y, RADIAL_SIZE, RADIAL_SIZE
-    );
-
-    let now = "2026-05-14T00:00:00Z";
-    let items: Vec<serde_json::Value> = (1..=paste::SLICE_COUNT)
-        .map(|i| serde_json::json!({
-            "id": i as i64,
-            "content": format!("Test slice {}", i),
-            "copied_at": now,
-            "char_count": 13_i32,
-        }))
-        .collect();
-
-    if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] test_radial: set_position failed: {:?}", e);
-    }
-    if let Err(e) = win.set_size(tauri::LogicalSize::new(RADIAL_SIZE, RADIAL_SIZE)) {
-        eprintln!("[pluks] test_radial: set_size failed: {:?}", e);
-    }
-    match win.show() {
-        Ok(()) => eprintln!("[pluks] test_radial: show() ok"),
-        Err(e) => eprintln!("[pluks] test_radial: show() failed: {:?}", e),
-    }
-    let payload = serde_json::json!({
-        "items": items,
-        "center": { "x": cx, "y": cy },
-    });
-    match win.emit("radial-show", &payload) {
-        Ok(()) => eprintln!("[pluks] test_radial: emit(radial-show) ok"),
-        Err(e) => eprintln!("[pluks] test_radial: emit failed: {:?}", e),
-    }
-
-    let app_for_hide = app.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(TEST_RADIAL_LIFETIME_MS));
-        if let Some(w) = app_for_hide.get_webview_window(paste::WIN_RADIAL) {
-            let _ = w.hide();
-            let _ = w.emit(
-                "radial-hide",
-                serde_json::json!({ "reason": "test_timeout" }),
-            );
         }
     });
 }
@@ -445,8 +436,8 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
     // CanJoinAllSpaces | FullScreenAuxiliary | Transient | Stationary | IgnoresCycle
     const COLLECTION: u64 = (1 << 0) | (1 << 8) | (1 << 3) | (1 << 4) | (1 << 6);
     // History panel sits at NSScreenSaverWindowLevel so it can float over other
-    // apps' full-screen Spaces. The transient overlay windows (nudge + radial)
-    // drop to NSPopUpMenuWindowLevel — Tahoe 26.x has been observed to silently
+    // apps' full-screen Spaces. The transient nudge overlay drops to
+    // NSPopUpMenuWindowLevel — Tahoe 26.x has been observed to silently
     // demote/clip windows in the screen-saver band for unentitled apps, and
     // pop-up menu level still puts us above any normal foreground app content
     // while staying well clear of the restricted band.
@@ -462,8 +453,8 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
     unsafe {
         // The PluksPanel subclass is only needed for windows that must become
         // key (the history panel — keyboard input). The class swap via
-        // object_setClass is fragile under Tahoe and unnecessary for
-        // click-through ambient surfaces, so skip it for nudge + radial.
+        // object_setClass is fragile under Tahoe and unnecessary for the
+        // click-through ambient nudge surface, so skip it there.
         if needs_key {
             let cls = pluks_panel_class();
             if !cls.is_null() {
@@ -785,15 +776,6 @@ pub fn run() {
                 let _ = win.set_ignore_cursor_events(true);
             }
 
-            // Configure the radial paste window. Same needs_key=false
-            // treatment as the nudge: pure visual surface, no keyboard
-            // input, click-through (all radial input is driven by
-            // paste.rs reading the global event tap directly).
-            if let Some(win) = app.get_webview_window(paste::WIN_RADIAL) {
-                configure_overlay_window(&win, false);
-                let _ = win.set_ignore_cursor_events(true);
-            }
-
             let db_path = app.path().app_data_dir().expect("no app data dir").join("pluck.db");
             let db = Database::new(db_path).expect("failed to open database");
             let state = Arc::new(AppState {
@@ -822,10 +804,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            // Diagnostic actions (v0.4.5). These bypass the gesture / capture
-            // pipeline and fire the overlay show paths directly so the user
-            // can verify whether nudge + radial actually render — independent
-            // of whether a real selection ever made it through capture.
+            // Diagnostic actions (v0.4.5). Bypass the capture / long-press
+            // pipelines and fire the overlay show paths directly so the user
+            // can verify whether the pill actually renders — independently
+            // of whether a real selection / hold made it through capture.
+            // "Test Paste Confirm" is the on-demand way to verify the
+            // silent-paste pill composites over fullscreen apps without
+            // having to trigger a real long-press from inside one.
             let test_nudge_item = MenuItem::with_id(
                 app,
                 TRAY_TEST_NUDGE,
@@ -833,10 +818,10 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let test_radial_item = MenuItem::with_id(
+            let test_paste_confirm_item = MenuItem::with_id(
                 app,
-                TRAY_TEST_RADIAL,
-                "Test Radial Menu (debug)",
+                TRAY_TEST_PASTE_CONFIRM,
+                "Test Paste Confirm (debug)",
                 true,
                 None::<&str>,
             )?;
@@ -847,7 +832,7 @@ pub fn run() {
                     &toggle_item,
                     &history_item,
                     &test_nudge_item,
-                    &test_radial_item,
+                    &test_paste_confirm_item,
                     &quit_item,
                 ],
             )?;
@@ -881,9 +866,10 @@ pub fn run() {
                                 "✦ Test nudge",
                             );
                         }
-                        TRAY_TEST_RADIAL => {
-                            eprintln!("[pluks] tray: TEST_RADIAL clicked");
-                            show_test_radial_impl(&app_handle);
+                        TRAY_TEST_PASTE_CONFIRM => {
+                            eprintln!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
+                            let (cx, cy) = cursor_pos();
+                            show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
                         }
                         TRAY_QUIT => {
                             // Give the frontend a chance to install a staged
@@ -1015,14 +1001,13 @@ pub fn run() {
             open_input_monitoring_settings,
             invoke_paste,
             show_nudge,
-            paste::radial_dismiss,
             settings::get_settings,
             settings::set_settings,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
-                if label == WIN_HISTORY || label == WIN_NUDGE || label == paste::WIN_RADIAL {
+                if label == WIN_HISTORY || label == WIN_NUDGE {
                     api.prevent_close();
                     let _ = window.hide();
                 }

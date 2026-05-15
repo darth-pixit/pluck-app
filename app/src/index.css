@@ -652,13 +652,13 @@ body:not(.platform-mac) .traffic-lights { display: none; }
   transform: translateY(0);
 }
 
-/* Hold-to-paste step — visual diagram of the radial gesture. */
+/* Hold-to-paste step — still-shot of the silent-paste confirmation pill. */
 .hold-demo {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 14px 8px;
+  gap: 12px;
+  padding: 18px 14px;
   background: rgba(255,255,255,0.03);
   border: 1px dashed rgba(255,255,255,0.14);
   border-radius: 8px;
@@ -669,43 +669,29 @@ body:not(.platform-mac) .traffic-lights { display: none; }
   border-color: rgba(252,76,2,0.55);
   background: rgba(252,76,2,0.08);
 }
-.hold-demo svg { display: block; }
-.hold-demo-slice {
-  fill: rgba(252,76,2,0.16);
-  stroke: rgba(252,76,2,0.45);
-  stroke-width: 1.2;
-  animation: hold-demo-fade .4s ease-out backwards;
-}
-.hold-demo-slice.highlight {
-  fill: rgba(252,76,2,0.85);
-  stroke: rgba(255,255,255,0.65);
-  animation: hold-demo-fade .4s ease-out backwards, hold-demo-pulse 2.2s ease-in-out 0.8s infinite;
-}
-.hold-demo-hub {
-  fill: rgba(20,14,10,0.92);
-  stroke: rgba(255,255,255,0.12);
-  stroke-width: 1.2;
-}
 .hold-demo-caption {
   font-size: 11.5px;
   color: var(--muted);
-  letter-spacing: 0.2px;
+  text-align: center;
+  line-height: 1.5;
+  max-width: 280px;
 }
 .hold-demo-caption kbd {
   display: inline-block;
-  padding: 0 4px;
-  background: transparent;
-  color: rgba(255,255,255,0.32);
-  font-family: inherit;
-  font-weight: 400;
+  padding: 1px 5px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
 }
-@keyframes hold-demo-fade {
-  from { opacity: 0; transform: scale(0.6); transform-origin: 80px 80px; }
-  to   { opacity: 1; transform: scale(1);   transform-origin: 80px 80px; }
-}
-@keyframes hold-demo-pulse {
-  0%, 100% { fill: rgba(252,76,2,0.55); }
-  50%      { fill: rgba(252,76,2,0.95); }
+/* The activation-tour pill is a reference image, not a live nudge — opt
+ * out of the fade-in/out animation so it stays visible while the user
+ * reads the caption. */
+.paste-confirm-pill-static {
+  animation: none;
 }
 
 /* ── Adaptive nudges (separate Tauri window) ───────────────────────── */
@@ -765,87 +751,81 @@ body.nudge-body {
   to   { opacity: 0; transform: translateY(-2px); }
 }
 
-/* ── Radial paste menu (separate Tauri window) ─────────────────────── */
+/* ── Silent-paste confirmation pill (lives in the nudge window) ─────── */
 
-/* Like the nudge window, the radial is transparent + click-through and
- * must not paint an opaque body that would defeat the window's transparency.
- * Geometry constants here MUST match RadialMenu.tsx and paste.rs. */
-body.radial-body {
-  background: transparent;
-  margin: 0;
-  overflow: hidden;
-  user-select: none;
+/* Quieter than `.nudge-pill` by design — this is ambient acknowledgement
+ * of a deliberate gesture, not a notification. No orange accent, no
+ * dot glow, smaller type, calmer fade. Total visible time matches
+ * PASTE_CONFIRM_LIFETIME_MS in lib.rs and PASTE_CONFIRM_DURATION_MS in
+ * NudgeView.tsx — bump all three together. */
+.paste-confirm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(20, 14, 10, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  white-space: nowrap;
+  /* Fade-in 0.26s ease-out, fade-out 0.35s ease-in starting at 2.0s.
+     Total visible ≈ 2.35s. `forwards` deliberately omitted: the React
+     component unmounts the pill at the end of PASTE_CONFIRM_DURATION_MS. */
+  animation:
+    paste-confirm-in  .26s ease-out,
+    paste-confirm-out .35s ease-in 2s;
 }
 
-.radial-root {
-  width: 100%;
-  height: 100%;
-  display: flex;
+.paste-confirm-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.55);
+  flex-shrink: 0;
+}
+
+.paste-confirm-lead {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.1px;
+}
+
+.paste-confirm-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.paste-confirm-kbd .kc {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  min-width: 12px;
+  height: 14px;
+  padding: 0 2px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-.radial-hidden { opacity: 0; }
-
-.radial-svg {
-  /* Same pop-in feel as the nudge — pluks's overall sparkle vocabulary. */
-  animation: radial-pop .14s cubic-bezier(.2,.9,.3,1.1);
-  filter: drop-shadow(0 12px 32px rgba(0,0,0,0.55));
-}
-
-@keyframes radial-pop {
-  from { opacity: 0; transform: scale(0.78); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.radial-slice {
-  fill: rgba(20, 14, 10, 0.92);
-  stroke: rgba(252, 76, 2, 0.30);
-  stroke-width: 1.5;
-  transition: fill .12s ease-out;
-}
-.radial-slice.active {
-  fill: rgba(252, 76, 2, 0.92);
-  stroke: rgba(255, 255, 255, 0.45);
-}
-
-.radial-hub {
-  fill: rgba(20, 14, 10, 0.92);
-  stroke: rgba(255, 255, 255, 0.10);
-  stroke-width: 1.5;
-  transition: fill .12s ease-out, stroke .12s ease-out;
-}
-.radial-hub.active {
-  /* Dead-zone "active" = pointer is in the centre — release-to-cancel.
-   * Subtle dim cue rather than a colour change. */
-  fill: rgba(40, 28, 20, 0.94);
-  stroke: rgba(255, 255, 255, 0.18);
-}
-
-.radial-label {
-  pointer-events: none;
-  fill: var(--text, #f1ece7);
-  transition: fill .12s ease-out;
-}
-
-.radial-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  fill: rgba(252, 76, 2, 0.85);
-  text-transform: uppercase;
-}
-
-.radial-text {
-  font-size: 10.5px;
-  font-weight: 500;
-  fill: rgba(255, 255, 255, 0.88);
+.paste-confirm-trail {
+  margin-left: 4px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.42);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.1px;
 }
 
-.radial-label.active .radial-badge { fill: rgba(255, 255, 255, 0.95); }
-.radial-label.active .radial-text  { fill: #fff; font-weight: 600; }
+@keyframes paste-confirm-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes paste-confirm-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
 
 /* ── Setup screen privacy note ─────────────────────────────────────── */
 .setup-privacy-note {

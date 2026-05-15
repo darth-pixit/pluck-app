@@ -2,19 +2,16 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import NudgeView from "./NudgeView";
-import RadialMenu from "./RadialMenu";
 import { ErrorBoundary, initAnalytics } from "./analytics";
 
-// The same compiled bundle serves three Tauri windows:
+// The same compiled bundle serves two Tauri windows:
 //   - main app at index.html
 //   - nudge overlay at index.html#nudge
-//   - radial paste overlay at index.html#radial
 // Routing by hash avoids a vite multi-page config; analytics + the
 // error boundary still wrap all surfaces because they're set up here.
 const hash = typeof window !== "undefined" ? window.location.hash : "";
 const isNudgeWindow = hash === "#nudge";
-const isRadialWindow = hash === "#radial";
-const isOverlay = isNudgeWindow || isRadialWindow;
+const isOverlay = isNudgeWindow;
 
 // DEV-only diagnostic: surface which window this bundle is mounting in.
 // If the v0.4.5 logs show `show_nudge: emit(nudge-show) ok` but the nudge
@@ -29,7 +26,6 @@ if (import.meta.env.DEV) {
     "[main.tsx] mounting hash=",
     JSON.stringify(hash),
     "isNudge=", isNudgeWindow,
-    "isRadial=", isRadialWindow,
     "isOverlay=", isOverlay,
   );
 }
@@ -37,17 +33,16 @@ if (import.meta.env.DEV) {
 // Fire-and-forget — analytics must never block the UI from rendering.
 // Skipped in overlay windows: those are passive views that issue no events.
 if (!isOverlay) initAnalytics();
-// Tag the body on overlay windows so their stylesheets can clear the
+// Tag the body on the nudge window so its stylesheet can clear the
 // default opaque background that would otherwise defeat transparency.
-if (typeof document !== "undefined") {
-  if (isNudgeWindow) document.body.classList.add("nudge-body");
-  if (isRadialWindow) document.body.classList.add("radial-body");
+if (typeof document !== "undefined" && isNudgeWindow) {
+  document.body.classList.add("nudge-body");
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary fallback={<CrashScreen />}>
-      {isRadialWindow ? <RadialMenu /> : isNudgeWindow ? <NudgeView /> : <App />}
+      {isNudgeWindow ? <NudgeView /> : <App />}
     </ErrorBoundary>
   </React.StrictMode>,
 );

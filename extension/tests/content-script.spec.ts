@@ -41,13 +41,11 @@ test.describe("Content script", () => {
     expect(toastText).toContain("Snagged");
   });
 
-  test("selecting text saves a history entry to chrome.storage.local", async ({ context, baseURL }) => {
+  test("selecting text saves a history entry to chrome.storage.local", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     await selectTextById(page, "prose");
-    // Read storage from the service worker.
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string; ts: number }> }>);
       return history;
     });
@@ -55,13 +53,12 @@ test.describe("Content script", () => {
     expect(history[0].text).toContain("quick brown fox");
   });
 
-  test("selecting the same text twice deduplicates", async ({ context, baseURL }) => {
+  test("selecting the same text twice deduplicates", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     await selectTextById(page, "prose");
     await selectTextById(page, "prose");
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
@@ -71,15 +68,14 @@ test.describe("Content script", () => {
     expect(matchCount).toBe(1);
   });
 
-  test("single-click on a select-all input captures the field value", async ({ context, baseURL }) => {
+  test("single-click on a select-all input captures the field value", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     // Real click — fires mousedown/mouseup and the page's onclick=this.select().
     await page.locator("#share-url").click();
     await page.waitForTimeout(300);
     await expect(page.locator("#__pluks_toast")).toBeVisible();
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
@@ -96,7 +92,7 @@ test.describe("Content script", () => {
     await expect(page.locator("#__pluks_toast")).not.toBeVisible();
   });
 
-  test("single-click on an input nested inside a shadow root captures the value", async ({ context, baseURL }) => {
+  test("single-click on an input nested inside a shadow root captures the value", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     // Click the inner input via piercing locator. mouseup target re-targets to
@@ -104,15 +100,14 @@ test.describe("Content script", () => {
     // composedPath to find the real <input>.
     await page.locator("my-shadow-input").locator("#shadow-input").click();
     await page.waitForTimeout(300);
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
     expect(history[0].text).toBe("shadow dom selected text");
   });
 
-  test("Cmd/Ctrl+A inside a textarea is captured even without a mouse gesture", async ({ context, baseURL }) => {
+  test("Cmd/Ctrl+A inside a textarea is captured even without a mouse gesture", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     await page.locator("#kb-textarea").focus();
@@ -120,30 +115,28 @@ test.describe("Content script", () => {
     // invisible to Pluks because capture only ran from mouseup.
     await page.keyboard.press("ControlOrMeta+a");
     await page.waitForTimeout(300);
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
     expect(history[0].text).toBe("keyboard selectable text in a textarea");
   });
 
-  test("programmatic .select() (no user gesture) is captured via the select event", async ({ context, baseURL }) => {
+  test("programmatic .select() (no user gesture) is captured via the select event", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     // Trigger a JS .select() via a button. The select event fires on the input
     // even though the user never interacted with it directly.
     await page.locator("#programmatic-select").click();
     await page.waitForTimeout(400);
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
     expect(history.some((i) => i.text === "https://example.com/share/abc123")).toBe(true);
   });
 
-  test("selections inside iframes are captured (all_frames injection)", async ({ context, baseURL }) => {
+  test("selections inside iframes are captured (all_frames injection)", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     const frame = page.frameLocator("#iframe-frame");
@@ -164,15 +157,14 @@ test.describe("Content script", () => {
       document.dispatchEvent(upEvt);
     });
     await page.waitForTimeout(400);
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
     expect(history.some((i) => i.text.includes("iframe content selectable here"))).toBe(true);
   });
 
-  test("history is saved even when clipboard.writeText rejects", async ({ context, baseURL }) => {
+  test("history is saved even when clipboard.writeText rejects", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     // The no-clipboard iframe is served with `Permissions-Policy:
@@ -206,20 +198,18 @@ test.describe("Content script", () => {
       document.dispatchEvent(upEvt);
     });
     await page.waitForTimeout(400);
-    const [worker] = context.serviceWorkers();
-    const history = await worker.evaluate(async () => {
+    const history = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: Array<{ text: string }> }>);
       return history;
     });
     expect(history.some((i) => i.text.includes("no clipboard available here"))).toBe(true);
   });
 
-  test("history is capped at 100 entries", async ({ context, baseURL }) => {
+  test("history is capped at 100 entries", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
     // Pre-load 100 entries directly via the service worker.
-    const [worker] = context.serviceWorkers();
-    await worker.evaluate(async () => {
+    await serviceWorker.evaluate(async () => {
       const items = Array.from({ length: 100 }, (_, i) => ({
         text: `pre-existing-${String(i).padStart(3, "0")}`,
         ts: Date.now() - (100 - i) * 1000,
@@ -227,7 +217,7 @@ test.describe("Content script", () => {
       await chrome.storage.local.set({ history: items });
     });
     await selectTextById(page, "prose");
-    const len = await worker.evaluate(async () => {
+    const len = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: unknown[] }>);
       return history.length;
     });

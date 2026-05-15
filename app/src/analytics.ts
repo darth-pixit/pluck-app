@@ -73,18 +73,13 @@ const SCHEMA: Record<string, readonly string[]> = {
   nudge_shown:                   ["kind", "selects_total_bucket"],
   nudge_suppressed:              ["kind", "reason"],
 
-  // Long-press radial paste menu. `radial_shown` fires once per fire
-  // (after every gate has cleared and the wheel is on-screen).
-  // `radial_committed` fires when the user releases on a valid slice
-  // and we successfully simulate paste into the target app.
-  // `radial_cancelled` covers every non-paste exit (release in the
-  // dead-zone, release outside the outer ring, clipboard write failure).
-  // `radial_suppressed` covers the gate-fail paths from `paste.rs`:
-  // disabled, panel_visible, secure_field, empty_history, no_window.
-  radial_shown:                  ["items_count_bucket"],
-  radial_committed:              ["slice_index", "char_count_bucket", "kind"],
-  radial_cancelled:              ["reason"],
-  radial_suppressed:             ["reason"],
+  // Long-press silent paste. `silent_paste_committed` fires after every
+  // gate has cleared and we've actually written + pasted the most recent
+  // clip. `silent_paste_suppressed` covers the gate-fail paths from
+  // `paste.rs`: disabled, panel_visible, secure_field, empty_history,
+  // clipboard_failed.
+  silent_paste_committed:        ["char_count_bucket"],
+  silent_paste_suppressed:       ["reason"],
   long_press_paste_toggled:      ["enabled"],
 
   history_loaded:                ["item_count", "load_ms"],
