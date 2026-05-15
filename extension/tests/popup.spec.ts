@@ -7,9 +7,8 @@ test.describe("Popup", () => {
     await expect(page.locator(".empty")).toContainText(/No history yet/);
   });
 
-  test("renders history entries from storage", async ({ context, extensionId }) => {
-    const [worker] = context.serviceWorkers();
-    await worker.evaluate(async () => {
+  test("renders history entries from storage", async ({ context, extensionId, serviceWorker }) => {
+    await serviceWorker.evaluate(async () => {
       await chrome.storage.local.set({
         history: [
           { text: "alpha entry", ts: Date.now() - 5000 },
@@ -23,9 +22,8 @@ test.describe("Popup", () => {
     await expect(page.locator(".item-text").nth(1)).toHaveText("beta entry");
   });
 
-  test("search filter narrows the list", async ({ context, extensionId }) => {
-    const [worker] = context.serviceWorkers();
-    await worker.evaluate(async () => {
+  test("search filter narrows the list", async ({ context, extensionId, serviceWorker }) => {
+    await serviceWorker.evaluate(async () => {
       await chrome.storage.local.set({
         history: [
           { text: "apple pie", ts: Date.now() },
@@ -44,10 +42,9 @@ test.describe("Popup", () => {
     await expect(page.locator(".item-text")).toHaveCount(3);
   });
 
-  test("clicking a row writes to clipboard and flashes ✓", async ({ context, extensionId }) => {
+  test("clicking a row writes to clipboard and flashes ✓", async ({ context, extensionId, serviceWorker }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const [worker] = context.serviceWorkers();
-    await worker.evaluate(async () => {
+    await serviceWorker.evaluate(async () => {
       await chrome.storage.local.set({
         history: [{ text: "the copied phrase", ts: Date.now() }],
       });
@@ -60,9 +57,8 @@ test.describe("Popup", () => {
     expect(clip).toBe("the copied phrase");
   });
 
-  test("Clear all empties the list and storage", async ({ context, extensionId }) => {
-    const [worker] = context.serviceWorkers();
-    await worker.evaluate(async () => {
+  test("Clear all empties the list and storage", async ({ context, extensionId, serviceWorker }) => {
+    await serviceWorker.evaluate(async () => {
       await chrome.storage.local.set({
         history: [{ text: "to be cleared", ts: Date.now() }],
       });
@@ -71,7 +67,7 @@ test.describe("Popup", () => {
     await page.goto(`chrome-extension://${extensionId}/popup.html`);
     await page.click("#clearBtn");
     await expect(page.locator(".empty")).toBeVisible();
-    const remaining = await worker.evaluate(async () => {
+    const remaining = await serviceWorker.evaluate(async () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: unknown[] }>);
       return history.length;
     });

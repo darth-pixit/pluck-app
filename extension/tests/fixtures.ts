@@ -1,4 +1,4 @@
-import { test as base, chromium, type BrowserContext } from "@playwright/test";
+import { test as base, chromium, type BrowserContext, type Worker } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -45,10 +45,26 @@ function startTestServer() {
   });
 }
 
+/**
+ * Resolve the extension's MV3 service worker, waiting for it to register if
+ * it hasn't yet. `context.serviceWorkers()` is a synchronous snapshot — on
+ * a fresh persistent context the SW frequently hasn't activated by the
+ * time the test body runs, leaving the array empty (subsequent
+ * `worker.evaluate` either crashes on `undefined` or runs in a half-bound
+ * SW where `chrome.storage` is undefined). The wait makes that race
+ * structurally impossible.
+ */
+async function resolveServiceWorker(context: BrowserContext): Promise<Worker> {
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent("serviceworker");
+  return worker;
+}
+
 export const test = base.extend<{
   context: BrowserContext;
   extensionId: string;
   baseURL: string;
+  serviceWorker: Worker;
 }>({
   // eslint-disable-next-line no-empty-pattern
   baseURL: async ({}, use) => {
@@ -79,10 +95,12 @@ export const test = base.extend<{
     }
   },
   extensionId: async ({ context }, use) => {
-    let [worker] = context.serviceWorkers();
-    if (!worker) worker = await context.waitForEvent("serviceworker");
+    const worker = await resolveServiceWorker(context);
     const id = worker.url().split("/")[2];
     await use(id);
+  },
+  serviceWorker: async ({ context }, use) => {
+    await use(await resolveServiceWorker(context));
   },
 });
 
