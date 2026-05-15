@@ -373,3 +373,13 @@ window.addEventListener("unhandledrejection", (ev) => {
 // Re-export Sentry's ErrorBoundary so callers can wrap their UI without a
 // second Sentry import.
 export const ErrorBoundary = Sentry.ErrorBoundary;
+
+// DEV-only diagnostic forwarder: pipes a string through the Tauri `diag_log`
+// command so it shows up in the `tauri dev` terminal alongside Rust eprintln
+// output. Webview console.log only reaches each window's own DevTools, which
+// is impractical to open on the click-through transparent overlay windows.
+// In production builds the call is a no-op.
+export function diagLog(msg: string): void {
+  if (!import.meta.env.DEV) return;
+  invoke("diag_log", { msg }).catch(() => {});
+}

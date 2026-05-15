@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Permissions for the click-through nudge + radial overlay windows. They never invoke window-management commands; they only need to listen for the show/hide/highlight events the Rust side emits, plus invoke the DEV-only diag_log forwarder.",
+  "windows": ["nudge", "radial"],
+  "permissions": [
+    "core:event:default"
+  ]
+}

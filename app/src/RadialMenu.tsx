@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { diagLog } from "./analytics";
 import { detect } from "./detectors";
 
 /**
@@ -87,13 +88,14 @@ export default function RadialMenu() {
 
   useEffect(() => {
     if (DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[radial-menu] mounted hash=", JSON.stringify(window.location.hash));
+      // Forwarded to the `tauri dev` terminal via Rust `diag_log`. Webview
+      // console.log only reaches this window's own DevTools, which is
+      // impractical to open on a click-through transparent panel.
+      diagLog(`[radial-menu] mounted hash=${JSON.stringify(window.location.hash)}`);
     }
     const unShow = listen<ShowPayload>("radial-show", evt => {
       if (DEV) {
-        // eslint-disable-next-line no-console
-        console.log("[radial-menu] received radial-show items=", evt.payload.items?.length);
+        diagLog(`[radial-menu] received radial-show items=${evt.payload.items?.length}`);
       }
       setEvtCount(c => c + 1);
       setItems(evt.payload.items.slice(0, SLICE_COUNT));
@@ -105,12 +107,21 @@ export default function RadialMenu() {
     });
     const unHide = listen("radial-hide", () => {
       if (DEV) {
-        // eslint-disable-next-line no-console
-        console.log("[radial-menu] received radial-hide");
+        diagLog("[radial-menu] received radial-hide");
       }
       setVisible(false);
       setActive(-1);
     });
+    if (DEV) {
+      // Confirm each listen() actually registered. Distinguishes "listener
+      // never attached" from "attached but no event arrived".
+      unShow.then(() => diagLog("[radial-menu] listen(radial-show) registered"))
+        .catch(e => diagLog(`[radial-menu] listen(radial-show) FAILED: ${String(e)}`));
+      unHigh.then(() => diagLog("[radial-menu] listen(radial-highlight) registered"))
+        .catch(e => diagLog(`[radial-menu] listen(radial-highlight) FAILED: ${String(e)}`));
+      unHide.then(() => diagLog("[radial-menu] listen(radial-hide) registered"))
+        .catch(e => diagLog(`[radial-menu] listen(radial-hide) FAILED: ${String(e)}`));
+    }
     return () => {
       unShow.then(fn => fn());
       unHigh.then(fn => fn());

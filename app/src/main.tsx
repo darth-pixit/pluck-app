@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import NudgeView from "./NudgeView";
 import RadialMenu from "./RadialMenu";
-import { ErrorBoundary, initAnalytics } from "./analytics";
+import { ErrorBoundary, diagLog, initAnalytics } from "./analytics";
 
 // The same compiled bundle serves three Tauri windows:
 //   - main app at index.html
@@ -24,13 +24,14 @@ const isOverlay = isNudgeWindow || isRadialWindow;
 // This log makes the actual hash visible per window so we can rule that in
 // or out without inspecting devtools.
 if (import.meta.env.DEV) {
-  // eslint-disable-next-line no-console
-  console.log(
-    "[main.tsx] mounting hash=",
-    JSON.stringify(hash),
-    "isNudge=", isNudgeWindow,
-    "isRadial=", isRadialWindow,
-    "isOverlay=", isOverlay,
+  // Forwarded to Rust via the `diag_log` Tauri command so the line shows
+  // up in the same `tauri dev` terminal as the `[pluks]` Rust eprintln
+  // output. Webview console.log can't reach that terminal directly, and
+  // the click-through overlay windows can't be right-clicked to open
+  // their DevTools.
+  diagLog(
+    `[main.tsx] mounting hash=${JSON.stringify(hash)} ` +
+    `isNudge=${isNudgeWindow} isRadial=${isRadialWindow} isOverlay=${isOverlay}`,
   );
 }
 

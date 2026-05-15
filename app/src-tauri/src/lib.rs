@@ -202,6 +202,17 @@ fn check_accessibility() -> bool {
     ax_is_trusted()
 }
 
+/// DEV-only diagnostic forwarder. Tauri webview `console.log` output goes to
+/// each window's own DevTools, not to the `tauri dev` terminal — and the
+/// nudge + radial overlay windows are click-through transparent panels you
+/// can't easily right-click to open DevTools on. So instead, the React
+/// probes call this command, and we eprintln from Rust into the terminal
+/// where the user is already watching `[pluks]` logs.
+#[tauri::command]
+fn diag_log(msg: String) {
+    eprintln!("[pluks][js] {}", msg);
+}
+
 /// Position the dedicated nudge window near the cursor and surface a
 /// `nudge-show` event to its webview so the React component renders
 /// the appropriate copy. Re-firing while a previous nudge is still
@@ -1007,6 +1018,7 @@ pub fn run() {
             delete_item,
             clear_history,
             check_accessibility,
+            diag_log,
             check_input_monitoring,
             open_accessibility_settings,
             open_input_monitoring_settings,

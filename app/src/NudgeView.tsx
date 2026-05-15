@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { diagLog } from "./analytics";
 
 /**
  * Renders inside the dedicated `nudge` Tauri window. Listens for
@@ -31,22 +32,27 @@ export default function NudgeView() {
 
   useEffect(() => {
     if (DEV) {
-      // Stream into the same terminal as `npm run tauri dev` so we can
-      // verify (a) the React tree mounted in this window at all and
-      // (b) what window.location.hash resolved to — if `main.tsx`'s
-      // hash routing failed, App.tsx would mount here instead and we'd
-      // never see this line for the nudge window specifically.
-      // eslint-disable-next-line no-console
-      console.log("[nudge-view] mounted hash=", JSON.stringify(window.location.hash));
+      // Forwarded to the `tauri dev` terminal via the Rust `diag_log`
+      // command (see analytics.diagLog). Webview console.log only reaches
+      // this window's own DevTools, which we can't open on a click-through
+      // transparent panel. If main.tsx's hash routing failed, App.tsx
+      // would mount here instead and we'd never see this line.
+      diagLog(`[nudge-view] mounted hash=${JSON.stringify(window.location.hash)}`);
     }
     const un = listen<ShowPayload>("nudge-show", evt => {
       if (DEV) {
-        // eslint-disable-next-line no-console
-        console.log("[nudge-view] received nudge-show:", evt.payload);
+        diagLog(`[nudge-view] received nudge-show kind=${evt.payload.kind}`);
       }
       setEvtCount(c => c + 1);
       setShown(evt.payload);
     });
+    if (DEV) {
+      // Confirm listen() actually registered (its returned promise resolves)
+      // — answers the "did the listener attach at all?" question separately
+      // from "did any event reach the listener?".
+      un.then(() => diagLog("[nudge-view] listen(nudge-show) registered"))
+        .catch(e => diagLog(`[nudge-view] listen(nudge-show) FAILED: ${String(e)}`));
+    }
     return () => { un.then(fn => fn()); };
   }, []);
 
