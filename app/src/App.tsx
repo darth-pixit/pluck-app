@@ -12,6 +12,7 @@ import {
   decideAffirmation,
   decideCorrective,
   decideHoldDiscovery,
+  recordHoldGesture,
   type NudgeDecision,
 } from "./nudges";
 import { detect } from "./detectors";
@@ -432,16 +433,20 @@ export default function App() {
   }, [runNudge]);
 
   // Long-press silent paste — Rust emits `paste-confirm` on a successful
-  // fire and `paste-suppressed` for each gate-fail (disabled, panel
-  // visible, secure field, empty history, clipboard write failed). We
-  // forward both to PostHog. The confirmation pill itself is rendered
-  // by `NudgeView` in the dedicated nudge window — App doesn't render
-  // any chrome for the gesture.
+  // fire and `paste-suppressed` for each gate-fail. The pill itself is
+  // rendered by `NudgeView`; App's job here is analytics + bumping the
+  // hold counter so the discovery nudge stops re-firing.
   useEffect(() => {
     type ConfirmPayload = { x: number; y: number; char_count: number };
     type SuppressedPayload = { reason: string };
 
     const unConfirm = listen<ConfirmPayload>("paste-confirm", event => {
+      // Bump the hold counter so `decideHoldDiscovery` stops nudging
+      // once the user has demonstrated they know the gesture. The
+      // discovery nudge gates on `stats.holds > 0` — without this
+      // increment it would re-fire on every selection past the
+      // baseline.
+      recordHoldGesture();
       track("silent_paste_committed", {
         char_count_bucket: bucket(event.payload?.char_count ?? 0),
       });

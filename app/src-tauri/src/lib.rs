@@ -89,6 +89,7 @@ const PASTE_WATCH_TICK_MS: u64 = 15;
 const TRAY_TOGGLE: &str = "toggle";
 const TRAY_HISTORY: &str = "history";
 const TRAY_TEST_NUDGE: &str = "test_nudge";
+const TRAY_TEST_PASTE_CONFIRM: &str = "test_paste_confirm";
 const TRAY_QUIT: &str = "quit";
 const TRAY_LABEL_DISABLE: &str = "Disable Auto-Copy";
 const TRAY_LABEL_ENABLE: &str = "Enable Auto-Copy";
@@ -219,56 +220,25 @@ fn show_nudge(app: AppHandle, state: State<Arc<AppState>>, kind: String, text: S
 }
 
 /// Inner implementation shared between the public `show_nudge` Tauri command
-/// and the tray "Test Nudge" diagnostic action. Every step is logged via
-/// `eprintln!` so the v0.4.5 diagnostic build surfaces exactly which point of
-/// the pipeline succeeds and which fails — visible in Console.app under
-/// "Pluks". Filter with: `process == "Pluks" && message CONTAINS "[pluks]"`.
+/// and the tray "Test Nudge" diagnostic action.
 fn show_nudge_impl(app: &AppHandle, state: &Arc<AppState>, kind: &str, text: &str) {
-    let Some(win) = app.get_webview_window(WIN_NUDGE) else {
-        eprintln!("[pluks] show_nudge: WIN_NUDGE not found");
-        return;
-    };
-    let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let (cx, cy) = cursor_pos();
-    let pos_x = cx + NUDGE_OFFSET_X;
-    let pos_y = cy + NUDGE_OFFSET_Y;
-    eprintln!(
-        "[pluks] show_nudge: gen={} kind={} cursor=({:.1},{:.1}) target=({:.1},{:.1}) size=({},{})",
-        my_gen, kind, cx, cy, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT
+    show_in_nudge_window(
+        app,
+        state,
+        cx + NUDGE_OFFSET_X,
+        cy + NUDGE_OFFSET_Y,
+        EVT_NUDGE_SHOW,
+        serde_json::json!({ "kind": kind, "text": text }),
+        NUDGE_LIFETIME_MS,
+        "show_nudge",
     );
-    if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] show_nudge: set_position failed: {:?}", e);
-    }
-    if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
-        eprintln!("[pluks] show_nudge: set_size failed: {:?}", e);
-    }
-    match win.show() {
-        Ok(()) => eprintln!("[pluks] show_nudge: show() ok"),
-        Err(e) => eprintln!("[pluks] show_nudge: show() failed: {:?}", e),
-    }
-    let payload = serde_json::json!({ "kind": kind, "text": text });
-    match win.emit(EVT_NUDGE_SHOW, &payload) {
-        Ok(()) => eprintln!("[pluks] show_nudge: emit({}) ok", EVT_NUDGE_SHOW),
-        Err(e) => eprintln!("[pluks] show_nudge: emit failed: {:?}", e),
-    }
-
-    let app_for_hide = app.clone();
-    let gen_arc = state.nudge_gen.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(NUDGE_LIFETIME_MS));
-        if gen_arc.load(Ordering::SeqCst) != my_gen {
-            return;
-        }
-        if let Some(w) = app_for_hide.get_webview_window(WIN_NUDGE) {
-            let _ = w.hide();
-        }
-    });
 }
 
-/// Anchor the nudge window at the press point and surface a `paste-confirm`
-/// event so `NudgeView` renders the silent-paste confirmation pill. Bumps the
-/// nudge generation counter just like `show_nudge_impl` so a copy-side
-/// affirmation that landed seconds earlier doesn't yank our window away.
+/// Anchor the nudge window at the press point and broadcast a
+/// `paste-confirm` event. The pill is rendered by `NudgeView`; App.tsx
+/// also listens on the broadcast for analytics + the hold-discovery
+/// counter bump.
 pub(crate) fn show_paste_confirm(
     app: &AppHandle,
     state: &Arc<AppState>,
@@ -276,35 +246,65 @@ pub(crate) fn show_paste_confirm(
     y: f64,
     char_count: usize,
 ) {
+    show_in_nudge_window(
+        app,
+        state,
+        x - PASTE_CONFIRM_OFFSET_X,
+        y + PASTE_CONFIRM_OFFSET_Y,
+        EVT_PASTE_CONFIRM,
+        serde_json::json!({ "x": x, "y": y, "char_count": char_count }),
+        PASTE_CONFIRM_LIFETIME_MS,
+        "show_paste_confirm",
+    );
+}
+
+/// Position + show the nudge window, broadcast `event` with `payload`,
+/// and schedule a hide after `lifetime_ms`. The generation counter
+/// guarantees a follow-up call within the lifetime window leaves the
+/// in-flight pill on screen instead of being yanked by the prior hide
+/// task. Every step is logged via `eprintln!` so the v0.4.5 diagnostic
+/// build surfaces which point of the pipeline succeeds and which fails
+/// — visible in Console.app under "Pluks". Filter with:
+/// `process == "Pluks" && message CONTAINS "[pluks]"`.
+fn show_in_nudge_window(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    pos_x: f64,
+    pos_y: f64,
+    event: &str,
+    payload: serde_json::Value,
+    lifetime_ms: u64,
+    log_tag: &str,
+) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
-        eprintln!("[pluks] show_paste_confirm: WIN_NUDGE not found");
+        eprintln!("[pluks] {}: WIN_NUDGE not found", log_tag);
         return;
     };
     let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    let pos_x = x - PASTE_CONFIRM_OFFSET_X;
-    let pos_y = y + PASTE_CONFIRM_OFFSET_Y;
     eprintln!(
-        "[pluks] show_paste_confirm: gen={} press=({:.1},{:.1}) target=({:.1},{:.1})",
-        my_gen, x, y, pos_x, pos_y
+        "[pluks] {}: gen={} target=({:.1},{:.1}) size=({},{}) event={}",
+        log_tag, my_gen, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT, event,
     );
     if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] show_paste_confirm: set_position failed: {:?}", e);
+        eprintln!("[pluks] {}: set_position failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
-        eprintln!("[pluks] show_paste_confirm: set_size failed: {:?}", e);
+        eprintln!("[pluks] {}: set_size failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.show() {
-        eprintln!("[pluks] show_paste_confirm: show() failed: {:?}", e);
+        eprintln!("[pluks] {}: show() failed: {:?}", log_tag, e);
     }
-    let payload = serde_json::json!({ "x": x, "y": y, "char_count": char_count });
-    if let Err(e) = win.emit(EVT_PASTE_CONFIRM, &payload) {
-        eprintln!("[pluks] show_paste_confirm: emit failed: {:?}", e);
+    // Broadcast — App.tsx in the history window may need to listen too
+    // (paste-confirm), and listeners in the nudge webview itself also
+    // receive broadcasts.
+    if let Err(e) = app.emit(event, &payload) {
+        eprintln!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
     }
 
     let app_for_hide = app.clone();
     let gen_arc = state.nudge_gen.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(PASTE_CONFIRM_LIFETIME_MS));
+        thread::sleep(Duration::from_millis(lifetime_ms));
         if gen_arc.load(Ordering::SeqCst) != my_gen {
             return;
         }
@@ -804,14 +804,24 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            // Diagnostic action (v0.4.5). Bypasses the capture pipeline and
-            // fires the nudge show path directly so the user can verify the
-            // overlay actually renders — independent of whether a real
-            // selection ever made it through capture.
+            // Diagnostic actions (v0.4.5). Bypass the capture / long-press
+            // pipelines and fire the overlay show paths directly so the user
+            // can verify whether the pill actually renders — independently
+            // of whether a real selection / hold made it through capture.
+            // "Test Paste Confirm" is the on-demand way to verify the
+            // silent-paste pill composites over fullscreen apps without
+            // having to trigger a real long-press from inside one.
             let test_nudge_item = MenuItem::with_id(
                 app,
                 TRAY_TEST_NUDGE,
                 "Test Nudge (debug)",
+                true,
+                None::<&str>,
+            )?;
+            let test_paste_confirm_item = MenuItem::with_id(
+                app,
+                TRAY_TEST_PASTE_CONFIRM,
+                "Test Paste Confirm (debug)",
                 true,
                 None::<&str>,
             )?;
@@ -822,6 +832,7 @@ pub fn run() {
                     &toggle_item,
                     &history_item,
                     &test_nudge_item,
+                    &test_paste_confirm_item,
                     &quit_item,
                 ],
             )?;
@@ -854,6 +865,11 @@ pub fn run() {
                                 "affirmation",
                                 "✦ Test nudge",
                             );
+                        }
+                        TRAY_TEST_PASTE_CONFIRM => {
+                            eprintln!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
+                            let (cx, cy) = cursor_pos();
+                            show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
                         }
                         TRAY_QUIT => {
                             // Give the frontend a chance to install a staged

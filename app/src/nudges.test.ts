@@ -5,6 +5,7 @@ import {
   decideHoldAffirmation,
   decideHoldDiscovery,
   readStats,
+  recordHoldGesture,
   resetNudgeStats,
 } from "./nudges";
 
@@ -213,6 +214,25 @@ describe("decideHoldAffirmation()", () => {
     const s = readStats();
     expect(s.selects).toBe(5);
     expect(s.holds).toBe(3);
+  });
+});
+
+describe("recordHoldGesture()", () => {
+  it("increments holds without surfacing a pill", () => {
+    recordHoldGesture();
+    recordHoldGesture();
+    expect(readStats().holds).toBe(2);
+    // No affirmations side effect — the silent-paste pill is the
+    // affirmation, and lives outside the nudge engine.
+    expect(readStats().holdAffirmationsShown).toBe(0);
+  });
+
+  it("flips decideHoldDiscovery's already_discovered gate", () => {
+    for (let i = 0; i < 10; i++) decideAffirmation();
+    recordHoldGesture();
+    const d = decideHoldDiscovery();
+    expect(d.show).toBe(false);
+    if (!d.show) expect(d.reason).toBe("already_discovered");
   });
 });
 

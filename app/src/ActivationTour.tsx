@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import PasteConfirmPill from "./PasteConfirmPill";
 import { track } from "./analytics";
 
 /**
@@ -255,24 +256,14 @@ export default function ActivationTour({ onDone }: Props) {
 }
 
 /**
- * Static still-shot of the silent-paste confirmation pill. Mirrors the
- * pill `NudgeView` renders in the dedicated nudge window when a long-press
- * commits — so the user recognises the shape when they encounter it in
- * product. No animation: this is a reference image, not a gesture demo.
+ * Reference frame for the hold-to-paste tour step. Renders the live pill
+ * in a static, non-fading variant so the user can read the caption without
+ * the pill animating off-screen.
  */
 function PasteConfirmDemo({ done }: { done: boolean }) {
   return (
     <div className={`hold-demo ${done ? "done" : ""}`}>
-      <div className="paste-confirm-pill paste-confirm-pill-static">
-        <span className="paste-confirm-dot" />
-        <span className="paste-confirm-lead">Pasted</span>
-        <span className="paste-confirm-kbd">
-          <span className="kc">⌃</span>
-          <span className="kc">⇧</span>
-          <span className="kc">V</span>
-          <span className="paste-confirm-trail">more</span>
-        </span>
-      </div>
+      <PasteConfirmPill static />
       <div className="hold-demo-caption">
         Long-press anywhere to paste your most recent clip. Hit{" "}
         <kbd>⌃⇧V</kbd> to pick from history.

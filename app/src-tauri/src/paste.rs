@@ -34,7 +34,6 @@ const LONG_PRESS_MS: u64 = 350;
 const DRAG_PIXEL_THRESHOLD: f64 = 4.0;
 const POST_ACTIVATE_SLEEP_MS: u64 = 80;
 
-const EVT_PASTE_CONFIRM: &str = "paste-confirm";
 const EVT_PASTE_SUPPRESSED: &str = "paste-suppressed";
 
 #[derive(Debug, Clone)]
@@ -231,10 +230,6 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
             simulate_paste();
 
             crate::show_paste_confirm(app, state, x, y, char_count);
-            let _ = app.emit(
-                EVT_PASTE_CONFIRM,
-                json!({ "x": x, "y": y, "char_count": char_count }),
-            );
 
             FsmState::Disarmed
         }

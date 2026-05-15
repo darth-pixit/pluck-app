@@ -20,9 +20,6 @@ pub struct ManualCopySignal;
 pub enum MouseEvent {
     Down { x: f64, y: f64 },
     Move { x: f64, y: f64 },
-    /// Coordinates dropped — the silent-paste FSM only cares that the
-    /// button came up, not where. Re-add fields if a future gesture needs
-    /// release-position info.
     Up,
 }
 
