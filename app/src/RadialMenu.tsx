@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { diagLog } from "./analytics";
 import { detect } from "./detectors";
 
 /**
@@ -76,21 +75,13 @@ function preview(content: string): string {
   return oneLine.length > 22 ? oneLine.slice(0, 21) + "…" : oneLine;
 }
 
-// `tauri dev` ⇒ true, bundled production build ⇒ false. Set by Vite at
-// build time so this probe disappears from shipped releases.
-const DEV = import.meta.env.DEV;
-
 export default function RadialMenu() {
   const [items, setItems] = useState<RadialItem[]>([]);
   const [active, setActive] = useState<number>(-1);
   const [visible, setVisible] = useState(false);
-  const [evtCount, setEvtCount] = useState(0);
 
   useEffect(() => {
-    if (DEV) diagLog(`[radial-menu] mounted hash=${JSON.stringify(window.location.hash)}`);
     const unShow = listen<ShowPayload>("radial-show", evt => {
-      if (DEV) diagLog(`[radial-menu] received radial-show items=${evt.payload.items?.length}`);
-      setEvtCount(c => c + 1);
       setItems(evt.payload.items.slice(0, SLICE_COUNT));
       setActive(-1);
       setVisible(true);
@@ -99,18 +90,9 @@ export default function RadialMenu() {
       setActive(evt.payload.inside ? evt.payload.index : -1);
     });
     const unHide = listen("radial-hide", () => {
-      if (DEV) diagLog("[radial-menu] received radial-hide");
       setVisible(false);
       setActive(-1);
     });
-    if (DEV) {
-      unShow.then(() => diagLog("[radial-menu] listen(radial-show) registered"))
-        .catch(e => diagLog(`[radial-menu] listen(radial-show) FAILED: ${String(e)}`));
-      unHigh.then(() => diagLog("[radial-menu] listen(radial-highlight) registered"))
-        .catch(e => diagLog(`[radial-menu] listen(radial-highlight) FAILED: ${String(e)}`));
-      unHide.then(() => diagLog("[radial-menu] listen(radial-hide) registered"))
-        .catch(e => diagLog(`[radial-menu] listen(radial-hide) FAILED: ${String(e)}`));
-    }
     return () => {
       unShow.then(fn => fn());
       unHigh.then(fn => fn());
@@ -118,54 +100,12 @@ export default function RadialMenu() {
     };
   }, []);
 
-  // DEV-only visibility probe. Always renders — independent of state.
-  // If you can see this red dot but not the radial SVG, the React tree
-  // is mounting and the window is rendering; the bug is in the
-  // event-driven `visible`/`items` state path. If you can't see this
-  // either, the window itself isn't being composited (or the webview
-  // is dead).
-  const devProbe = DEV ? (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: 16,
-        height: 16,
-        background: "lime",
-        zIndex: 10000,
-        pointerEvents: "none",
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 18,
-          fontSize: 9,
-          color: "magenta",
-          whiteSpace: "nowrap",
-          textShadow: "0 0 2px black",
-        }}
-      >
-        r{evtCount}
-      </span>
-    </div>
-  ) : null;
-
   if (!visible || items.length === 0) {
-    return (
-      <>
-        {devProbe}
-        <div className="radial-root radial-hidden" aria-hidden="true" />
-      </>
-    );
+    return <div className="radial-root radial-hidden" aria-hidden="true" />;
   }
 
   return (
-    <>
-      {devProbe}
-      <div className="radial-root" aria-hidden="true">
+    <div className="radial-root" aria-hidden="true">
       <svg
         className="radial-svg"
         viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -212,7 +152,6 @@ export default function RadialMenu() {
           );
         })}
       </svg>
-      </div>
-    </>
+    </div>
   );
 }

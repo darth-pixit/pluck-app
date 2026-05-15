@@ -373,10 +373,3 @@ window.addEventListener("unhandledrejection", (ev) => {
 // Re-export Sentry's ErrorBoundary so callers can wrap their UI without a
 // second Sentry import.
 export const ErrorBoundary = Sentry.ErrorBoundary;
-
-// DEV-only forwarder so the click-through overlay windows (no openable
-// DevTools) can route console output to the `tauri dev` terminal.
-export function diagLog(msg: string): void {
-  if (!import.meta.env.DEV) return;
-  invoke("diag_log", { msg }).catch(() => {});
-}
