@@ -43,7 +43,7 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
   },
   "hold-to-paste": {
     title: "Hold to paste — no Cmd+V either",
-    body: "Anywhere on your Mac, press and hold for half a second. A wheel of your recent clips appears. Drag to one, let go — pasted.",
+    body: "Long-press anywhere to paste your most recent clip. Hit ⌃⇧V to pick from history.",
     success: "You'll feel it when you try it.",
     nextLabel: "Got it →",
   },
@@ -130,8 +130,8 @@ export default function ActivationTour({ onDone }: Props) {
   }, []);
 
   // Hold-to-paste is the one step we can't gesture-gate inside the tour:
-  // the radial requires the history panel to be closed, but closing it
-  // tears down the tour. Treat it as an awareness step — auto-mark hit
+  // long-press paste requires the history panel to be closed, but closing
+  // it tears down the tour. Treat it as an awareness step — auto-mark hit
   // as soon as we land on it so the user can advance after reading the
   // explanation. The in-product discovery nudge (`hold_discovery` in
   // nudges.ts) handles real-world reinforcement once they have clips banked.
@@ -220,7 +220,7 @@ export default function ActivationTour({ onDone }: Props) {
           </p>
         )}
         {step === "hold-to-paste" && (
-          <HoldDemo done={hit["hold-to-paste"]} />
+          <PasteConfirmDemo done={hit["hold-to-paste"]} />
         )}
         {step === "shortcut" && (
           <div className={`activation-shortcut ${hit.shortcut ? "done" : ""}`}>
@@ -255,53 +255,27 @@ export default function ActivationTour({ onDone }: Props) {
 }
 
 /**
- * Static-ish radial diagram for the activation tour. Renders the same
- * 5-slice geometry the real radial uses (see RadialMenu.tsx and paste.rs)
- * so the user recognises the shape when they encounter it in product. The
- * CSS handles a gentle "press" pulse so it reads as a gesture, not a logo.
+ * Static still-shot of the silent-paste confirmation pill. Mirrors the
+ * pill `NudgeView` renders in the dedicated nudge window when a long-press
+ * commits — so the user recognises the shape when they encounter it in
+ * product. No animation: this is a reference image, not a gesture demo.
  */
-function HoldDemo({ done }: { done: boolean }) {
-  const SIZE = 160;
-  const CENTER = SIZE / 2;
-  const INNER = 24;
-  const OUTER = 70;
-  const SLICES = 5;
-  const STEP = 360 / SLICES;
-  const polar = (deg: number, r: number): [number, number] => {
-    const rad = (deg * Math.PI) / 180;
-    return [CENTER + r * Math.sin(rad), CENTER - r * Math.cos(rad)];
-  };
-  const path = (i: number): string => {
-    const a0 = i * STEP - STEP / 2;
-    const a1 = i * STEP + STEP / 2;
-    const [ox0, oy0] = polar(a0, OUTER);
-    const [ox1, oy1] = polar(a1, OUTER);
-    const [ix0, iy0] = polar(a0, INNER);
-    const [ix1, iy1] = polar(a1, INNER);
-    return [
-      `M ${ox0} ${oy0}`,
-      `A ${OUTER} ${OUTER} 0 0 1 ${ox1} ${oy1}`,
-      `L ${ix1} ${iy1}`,
-      `A ${INNER} ${INNER} 0 0 0 ${ix0} ${iy0}`,
-      "Z",
-    ].join(" ");
-  };
-
+function PasteConfirmDemo({ done }: { done: boolean }) {
   return (
     <div className={`hold-demo ${done ? "done" : ""}`}>
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} aria-hidden="true">
-        {Array.from({ length: SLICES }).map((_, i) => (
-          <path
-            key={i}
-            d={path(i)}
-            className={`hold-demo-slice ${i === 1 ? "highlight" : ""}`}
-            style={{ animationDelay: `${i * 90}ms` }}
-          />
-        ))}
-        <circle cx={CENTER} cy={CENTER} r={INNER - 3} className="hold-demo-hub" />
-      </svg>
+      <div className="paste-confirm-pill paste-confirm-pill-static">
+        <span className="paste-confirm-dot" />
+        <span className="paste-confirm-lead">Pasted</span>
+        <span className="paste-confirm-kbd">
+          <span className="kc">⌃</span>
+          <span className="kc">⇧</span>
+          <span className="kc">V</span>
+          <span className="paste-confirm-trail">more</span>
+        </span>
+      </div>
       <div className="hold-demo-caption">
-        press <kbd>·</kbd> hold <kbd>·</kbd> release on a slice
+        Long-press anywhere to paste your most recent clip. Hit{" "}
+        <kbd>⌃⇧V</kbd> to pick from history.
       </div>
     </div>
   );

@@ -17,8 +17,8 @@ const KEY_REDUNDANT = "pluks.nudges.redundant_copies_total";
 const KEY_AFFIRMATIONS = "pluks.nudges.affirmations_shown_total";
 const KEY_LAST_CORRECTIVE = "pluks.nudges.last_corrective_at";
 
-// Paste-side (long-press radial) counters. Mirror the copy-side shape so
-// the funnel works the same way in PostHog.
+// Paste-side (long-press) counters. Mirror the copy-side shape so the
+// funnel works the same way in PostHog.
 const KEY_HOLDS = "pluks.nudges.holds_total";
 const KEY_HOLD_AFFIRMATIONS = "pluks.nudges.hold_affirmations_shown_total";
 const KEY_HOLD_DISCOVERY_SHOWN = "pluks.nudges.hold_discovery_shown_total";
@@ -164,7 +164,7 @@ export function decideCorrective(): NudgeDecision {
 }
 
 /**
- * Called on every successful long-press radial paste. Mirrors
+ * Called on every successful long-press paste. Mirrors
  * `decideAffirmation` but lives on its own counter so the two tiers
  * decay independently — a user who's mastered copy can still get the
  * first 20 affirmations on paste while they learn the hold gesture.

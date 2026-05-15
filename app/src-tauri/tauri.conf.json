@@ -41,23 +41,6 @@
         "visibleOnAllWorkspaces": true,
         "focus": false,
         "shadow": false
-      },
-      {
-        "label": "radial",
-        "title": "Pluks",
-        "url": "index.html#radial",
-        "width": 260,
-        "height": 260,
-        "visible": false,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "transparent": true,
-        "resizable": false,
-        "skipTaskbar": true,
-        "visibleOnAllWorkspaces": true,
-        "focus": false,
-        "shadow": false,
-        "acceptFirstMouse": false
       }
     ],
     "security": {

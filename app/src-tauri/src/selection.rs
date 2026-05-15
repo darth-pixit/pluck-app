@@ -16,11 +16,14 @@ pub struct ManualCopySignal;
 /// long-press gesture from it. The `Move` variant only fires while the
 /// button is down — we don't care about hover motion. Coordinates are in
 /// the same screen space `cursor_pos()` returns (logical pixels on macOS,
-/// physical pixels on Windows; the radial window's position units match).
+/// physical pixels on Windows; the nudge window's position units match).
 pub enum MouseEvent {
     Down { x: f64, y: f64 },
     Move { x: f64, y: f64 },
-    Up   { x: f64, y: f64 },
+    /// Coordinates dropped — the silent-paste FSM only cares that the
+    /// button came up, not where. Re-add fields if a future gesture needs
+    /// release-position info.
+    Up,
 }
 
 const DRAG_PIXEL_THRESHOLD: f64 = 4.0;
@@ -684,7 +687,7 @@ mod mac_tap {
                 if ctx.button_down {
                     ctx.button_down = false;
                     let p = CGEventGetLocation(ev);
-                    let _ = ctx.tx_mouse.try_send(MouseEvent::Up { x: p.x, y: p.y });
+                    let _ = ctx.tx_mouse.try_send(MouseEvent::Up);
                     let dx = (p.x - ctx.press_x).abs();
                     let dy = (p.y - ctx.press_y).abs();
                     let gap = ctx.last_release.elapsed().as_millis();
@@ -834,7 +837,7 @@ mod rdev_listener {
             EventType::ButtonRelease(Button::Left) => {
                 if !button_down { return; }
                 button_down = false;
-                let _ = tx_mouse.try_send(MouseEvent::Up { x: cur_x, y: cur_y });
+                let _ = tx_mouse.try_send(MouseEvent::Up);
                 let dx = (cur_x - press_x).abs();
                 let dy = (cur_y - press_y).abs();
                 let gap = last_release.elapsed().as_millis();

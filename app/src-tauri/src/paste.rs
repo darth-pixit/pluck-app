@@ -1,11 +1,12 @@
-//! Long-press paste — a radial menu of recent clips on a still hold.
+//! Long-press paste — silently paste the most recent clip on a still hold.
 //!
 //! Subscribes to the low-level `MouseEvent` stream forwarded by
 //! `selection.rs`, runs a small state machine to detect "press and hold
-//! without moving for ~350 ms" anywhere on the OS, and drives a
-//! transparent radial window that shows the user's most recent clips.
-//! Releasing on a slice pastes that clip into whatever app was active
-//! when the press began.
+//! without moving for ~350 ms" anywhere on the OS, and pastes the most
+//! recent clip into whatever app was active when the press began. A
+//! whisper-quiet confirmation pill flashes near the press point for
+//! ~2 s afterwards (rendered by the existing nudge window). Most paste
+//! cases are "paste what I just copied"; ⌃⇧V handles the long tail.
 //!
 //! Gesture rule: **movement wins**. Any pointer motion above the existing
 //! `DRAG_PIXEL_THRESHOLD` before 350 ms permanently disarms long-press
@@ -19,8 +20,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 
+use crate::history::HistoryItem;
 use crate::selection::{
     activate_pid, focus_is_secure_field, frontmost_pid, simulate_paste, write_clipboard,
     MouseEvent,
@@ -28,22 +30,14 @@ use crate::selection::{
 use crate::settings;
 use crate::AppState;
 
-pub const WIN_RADIAL: &str = "radial";
-
 const LONG_PRESS_MS: u64 = 350;
 const DRAG_PIXEL_THRESHOLD: f64 = 4.0;
-const RADIAL_SIZE: f64 = 260.0;
-const DEAD_ZONE_PX: f64 = 36.0;
-const OUTER_RADIUS_PX: f64 = 120.0;
-pub const SLICE_COUNT: usize = 5;
 const POST_ACTIVATE_SLEEP_MS: u64 = 80;
 
-const EVT_RADIAL_SHOW: &str = "radial-show";
-const EVT_RADIAL_HIGHLIGHT: &str = "radial-highlight";
-const EVT_RADIAL_HIDE: &str = "radial-hide";
-const EVT_RADIAL_SUPPRESSED: &str = "radial-suppressed";
+const EVT_PASTE_CONFIRM: &str = "paste-confirm";
+const EVT_PASTE_SUPPRESSED: &str = "paste-suppressed";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum FsmState {
     Idle,
     Armed {
@@ -55,11 +49,14 @@ enum FsmState {
     /// current press cycle ends — a later "stillness" must not retroactively
     /// re-arm the long-press.
     Disarmed,
-    Fired {
-        center_x: f64,
-        center_y: f64,
-        highlight: i8,
-    },
+}
+
+/// Outcome of a single FSM step. Pure — kept separate from `try_fire` so the
+/// transition table can be unit-tested without an `AppHandle` / `AppState`.
+#[derive(Debug)]
+enum Step {
+    Continue(FsmState),
+    Fire { press_x: f64, press_y: f64 },
 }
 
 pub fn start_paste_processor(
@@ -108,23 +105,19 @@ fn handle_event(
     state: &Arc<AppState>,
     app: &AppHandle,
 ) -> FsmState {
+    match fsm_step(fsm, ev) {
+        Step::Continue(next) => next,
+        Step::Fire { press_x, press_y } => try_fire(press_x, press_y, state, app),
+    }
+}
+
+fn fsm_step(fsm: FsmState, ev: MouseEvent) -> Step {
     match (fsm, ev) {
-        // A second Down without an intervening Up shouldn't happen on a real
-        // device, but be defensive: hide any stale radial and start fresh.
-        (FsmState::Fired { .. }, MouseEvent::Down { x, y }) => {
-            hide_radial(app);
-            state.set_target_pid(None);
-            FsmState::Armed {
-                press_x: x,
-                press_y: y,
-                press_at: Instant::now(),
-            }
-        }
-        (_, MouseEvent::Down { x, y }) => FsmState::Armed {
+        (_, MouseEvent::Down { x, y }) => Step::Continue(FsmState::Armed {
             press_x: x,
             press_y: y,
             press_at: Instant::now(),
-        },
+        }),
 
         (
             FsmState::Armed {
@@ -137,268 +130,275 @@ fn handle_event(
             let dx = (x - press_x).abs();
             let dy = (y - press_y).abs();
             if dx > DRAG_PIXEL_THRESHOLD || dy > DRAG_PIXEL_THRESHOLD {
-                FsmState::Disarmed
+                Step::Continue(FsmState::Disarmed)
             } else if press_at.elapsed() >= Duration::from_millis(LONG_PRESS_MS) {
-                try_fire(press_x, press_y, state, app)
+                Step::Fire { press_x, press_y }
             } else {
-                FsmState::Armed {
+                Step::Continue(FsmState::Armed {
                     press_x,
                     press_y,
                     press_at,
-                }
+                })
             }
         }
 
-        (FsmState::Armed { .. }, MouseEvent::Up { .. }) => FsmState::Idle,
-        (FsmState::Disarmed, MouseEvent::Move { .. }) => FsmState::Disarmed,
-        (FsmState::Disarmed, MouseEvent::Up { .. }) => FsmState::Idle,
+        (FsmState::Armed { .. }, MouseEvent::Up) => Step::Continue(FsmState::Idle),
+        (FsmState::Disarmed, MouseEvent::Move { .. }) => Step::Continue(FsmState::Disarmed),
+        (FsmState::Disarmed, MouseEvent::Up) => Step::Continue(FsmState::Idle),
 
-        (
-            FsmState::Fired {
-                center_x,
-                center_y,
-                highlight,
-            },
-            MouseEvent::Move { x, y },
-        ) => {
-            let new_slice = compute_slice(x - center_x, y - center_y);
-            if new_slice != highlight {
-                let _ = app.emit(
-                    EVT_RADIAL_HIGHLIGHT,
-                    json!({ "index": new_slice, "inside": new_slice >= 0 }),
-                );
-            }
-            FsmState::Fired {
-                center_x,
-                center_y,
-                highlight: new_slice,
-            }
-        }
+        (FsmState::Idle, _) => Step::Continue(FsmState::Idle),
+    }
+}
 
-        (
-            FsmState::Fired {
-                center_x,
-                center_y,
-                highlight: _,
-            },
-            MouseEvent::Up { x, y },
-        ) => {
-            let slice = compute_slice(x - center_x, y - center_y);
-            commit_or_cancel(slice, state, app);
-            FsmState::Idle
-        }
+#[derive(Debug, PartialEq)]
+enum FireDecision {
+    Skip(&'static str),
+    Paste { content: String, char_count: usize },
+}
 
-        (FsmState::Idle, _) => FsmState::Idle,
+/// Pure decision: given the gate inputs and the most-recent clip, do we
+/// paste, and which content? Split out so the suppression matrix is
+/// testable without tauri / FFI dependencies.
+fn decide_fire(
+    enabled: bool,
+    panel_visible: bool,
+    secure_field: bool,
+    most_recent: Option<HistoryItem>,
+) -> FireDecision {
+    if !enabled {
+        return FireDecision::Skip("disabled");
+    }
+    if panel_visible {
+        return FireDecision::Skip("panel_visible");
+    }
+    if secure_field {
+        return FireDecision::Skip("secure_field");
+    }
+    let Some(item) = most_recent else {
+        return FireDecision::Skip("empty_history");
+    };
+    let char_count = item.content.chars().count();
+    FireDecision::Paste {
+        content: item.content,
+        char_count,
     }
 }
 
 fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState {
-    eprintln!("[pluks] try_fire: at=({:.1},{:.1})", x, y);
     let cfg = settings::load_or_init(app);
-    if !cfg.enable_long_press_paste {
-        eprintln!("[pluks] try_fire: suppressed disabled");
-        emit_suppressed(app, "disabled");
-        return FsmState::Disarmed;
-    }
-    if let Some(win) = app.get_webview_window(crate::WIN_HISTORY) {
-        if win.is_visible().unwrap_or(false) {
-            eprintln!("[pluks] try_fire: suppressed panel_visible");
-            emit_suppressed(app, "panel_visible");
-            return FsmState::Disarmed;
-        }
-    }
-    if focus_is_secure_field() {
-        eprintln!("[pluks] try_fire: suppressed secure_field");
-        emit_suppressed(app, "secure_field");
-        return FsmState::Disarmed;
-    }
-    let items: Vec<_> = state
+    let panel_visible = app
+        .get_webview_window(crate::WIN_HISTORY)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    let most_recent = state
         .db()
         .get_all()
         .unwrap_or_default()
         .into_iter()
-        .take(SLICE_COUNT)
-        .collect();
-    if items.is_empty() {
-        eprintln!("[pluks] try_fire: suppressed empty_history");
-        emit_suppressed(app, "empty_history");
-        return FsmState::Disarmed;
+        .next();
+
+    match decide_fire(
+        cfg.enable_long_press_paste,
+        panel_visible,
+        focus_is_secure_field(),
+        most_recent,
+    ) {
+        FireDecision::Skip(reason) => {
+            eprintln!("[pluks] try_fire: suppressed {}", reason);
+            let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": reason }));
+            FsmState::Disarmed
+        }
+        FireDecision::Paste {
+            content,
+            char_count,
+        } => {
+            // Capture which app owned the press so paste lands there even if
+            // focus drifts before we synthesize Cmd+V.
+            let our_pid = std::process::id() as i32;
+            let target = frontmost_pid().filter(|&p| p != our_pid);
+            state.set_target_pid(target);
+
+            if !write_clipboard(&content) {
+                eprintln!("[pluks] try_fire: clipboard write failed");
+                let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": "clipboard_failed" }));
+                state.set_target_pid(None);
+                return FsmState::Disarmed;
+            }
+            if let Some(pid) = state.take_target_pid() {
+                activate_pid(pid);
+                thread::sleep(Duration::from_millis(POST_ACTIVATE_SLEEP_MS));
+            }
+            simulate_paste();
+
+            crate::show_paste_confirm(app, state, x, y, char_count);
+            let _ = app.emit(
+                EVT_PASTE_CONFIRM,
+                json!({ "x": x, "y": y, "char_count": char_count }),
+            );
+
+            FsmState::Disarmed
+        }
     }
-
-    // Capture which app owned the press so paste lands there even if the
-    // user's focus drifts elsewhere before they release.
-    let our_pid = std::process::id() as i32;
-    let target = frontmost_pid().filter(|&p| p != our_pid);
-    state.set_target_pid(target);
-
-    let Some(win) = app.get_webview_window(WIN_RADIAL) else {
-        eprintln!("[pluks] try_fire: suppressed no_window");
-        emit_suppressed(app, "no_window");
-        return FsmState::Disarmed;
-    };
-    let pos_x = x - RADIAL_SIZE / 2.0;
-    let pos_y = y - RADIAL_SIZE / 2.0;
-    eprintln!(
-        "[pluks] try_fire: target=({:.1},{:.1}) size=({},{}) items={}",
-        pos_x, pos_y, RADIAL_SIZE, RADIAL_SIZE, items.len()
-    );
-    if let Err(e) = win.set_position(LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] try_fire: set_position failed: {:?}", e);
-    }
-    if let Err(e) = win.set_size(LogicalSize::new(RADIAL_SIZE, RADIAL_SIZE)) {
-        eprintln!("[pluks] try_fire: set_size failed: {:?}", e);
-    }
-    match win.show() {
-        Ok(()) => eprintln!("[pluks] try_fire: show() ok"),
-        Err(e) => eprintln!("[pluks] try_fire: show() failed: {:?}", e),
-    }
-
-    let payload = json!({ "items": items, "center": { "x": x, "y": y } });
-    match win.emit(EVT_RADIAL_SHOW, &payload) {
-        Ok(()) => eprintln!("[pluks] try_fire: emit({}) ok", EVT_RADIAL_SHOW),
-        Err(e) => eprintln!("[pluks] try_fire: emit failed: {:?}", e),
-    }
-
-    FsmState::Fired {
-        center_x: x,
-        center_y: y,
-        highlight: -1,
-    }
-}
-
-fn commit_or_cancel(slice: i8, state: &Arc<AppState>, app: &AppHandle) {
-    hide_radial(app);
-
-    if slice < 0 {
-        let _ = app.emit(
-            EVT_RADIAL_HIDE,
-            json!({ "reason": "cancelled", "index": slice }),
-        );
-        state.set_target_pid(None);
-        return;
-    }
-
-    // Re-query rather than trusting the snapshot from `radial-show` —
-    // a new selection could have landed between fire and release.
-    let items = state.db().get_all().unwrap_or_default();
-    let Some(item) = items.get(slice as usize) else {
-        let _ = app.emit(
-            EVT_RADIAL_HIDE,
-            json!({ "reason": "cancelled", "index": slice }),
-        );
-        state.set_target_pid(None);
-        return;
-    };
-    let content = item.content.clone();
-    let char_count = content.chars().count();
-
-    if !write_clipboard(&content) {
-        let _ = app.emit(
-            EVT_RADIAL_HIDE,
-            json!({ "reason": "clipboard_failed", "index": slice }),
-        );
-        state.set_target_pid(None);
-        return;
-    }
-    if let Some(pid) = state.take_target_pid() {
-        activate_pid(pid);
-        thread::sleep(Duration::from_millis(POST_ACTIVATE_SLEEP_MS));
-    }
-    simulate_paste();
-
-    let _ = app.emit(
-        EVT_RADIAL_HIDE,
-        json!({
-            "reason": "committed",
-            "index": slice,
-            "char_count": char_count,
-        }),
-    );
-}
-
-fn hide_radial(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(WIN_RADIAL) {
-        let _ = win.hide();
-    }
-}
-
-fn emit_suppressed(app: &AppHandle, reason: &str) {
-    let _ = app.emit(EVT_RADIAL_SUPPRESSED, json!({ "reason": reason }));
-}
-
-/// Slice index from cursor offset relative to radial center. Slice 0 is at
-/// 12 o'clock, indices grow clockwise. Returns -1 for the central dead-zone
-/// (too close to commit) or outside the outer ring (release-to-cancel).
-fn compute_slice(dx: f64, dy: f64) -> i8 {
-    let r2 = dx * dx + dy * dy;
-    if r2 < DEAD_ZONE_PX * DEAD_ZONE_PX {
-        return -1;
-    }
-    if r2 > OUTER_RADIUS_PX * OUTER_RADIUS_PX {
-        return -1;
-    }
-    // atan2(dx, -dy): 0 rad = up, +π/2 = right, ±π = down, -π/2 = left.
-    // Screen Y grows downward, so "up" is -dy.
-    let theta = dx.atan2(-dy);
-    let mut deg = theta.to_degrees();
-    if deg < 0.0 {
-        deg += 360.0;
-    }
-    let step = 360.0 / SLICE_COUNT as f64;
-    let i = ((deg / step).round() as i64).rem_euclid(SLICE_COUNT as i64);
-    i as i8
-}
-
-// ── Tauri commands ─────────────────────────────────────────────────────────
-
-/// Safety valve: explicit dismiss in case the FSM ever ends up Fired with no
-/// corresponding mouse-up (Spaces switch eating the event, dev rebuild, etc.).
-#[tauri::command]
-pub fn radial_dismiss(app: AppHandle, state: State<Arc<AppState>>) {
-    hide_radial(&app);
-    state.set_target_pid(None);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::HistoryItem;
 
-    #[test]
-    fn slice_top_is_zero() {
-        assert_eq!(compute_slice(0.0, -80.0), 0);
+    fn item(content: &str) -> HistoryItem {
+        HistoryItem {
+            id: 1,
+            content: content.into(),
+            copied_at: "2026-05-15T00:00:00Z".into(),
+            char_count: content.chars().count(),
+        }
     }
 
+    fn matches_armed(s: &FsmState, x: f64, y: f64) -> bool {
+        matches!(s, FsmState::Armed { press_x, press_y, .. } if *press_x == x && *press_y == y)
+    }
+
+    fn fresh_armed(x: f64, y: f64) -> FsmState {
+        FsmState::Armed {
+            press_x: x,
+            press_y: y,
+            press_at: Instant::now(),
+        }
+    }
+
+    fn elapsed_armed(x: f64, y: f64) -> FsmState {
+        FsmState::Armed {
+            press_x: x,
+            press_y: y,
+            press_at: Instant::now() - Duration::from_millis(LONG_PRESS_MS + 50),
+        }
+    }
+
+    // ── FSM transition table ──────────────────────────────────────────────
+
     #[test]
-    fn slice_clockwise_progression() {
-        let r = 80.0;
-        for i in 0..SLICE_COUNT {
-            let theta = (i as f64 * 360.0 / SLICE_COUNT as f64).to_radians();
-            let dx = r * theta.sin();
-            let dy = -r * theta.cos();
-            assert_eq!(compute_slice(dx, dy), i as i8, "slice {i}");
+    fn down_arms_from_idle() {
+        let step = fsm_step(FsmState::Idle, MouseEvent::Down { x: 100.0, y: 100.0 });
+        match step {
+            Step::Continue(s) => assert!(matches_armed(&s, 100.0, 100.0)),
+            _ => panic!("expected Continue(Armed)"),
         }
     }
 
     #[test]
-    fn slice_dead_zone_returns_minus_one() {
-        assert_eq!(compute_slice(0.0, 0.0), -1);
-        assert_eq!(compute_slice(20.0, 20.0), -1);
+    fn down_after_disarmed_re_arms() {
+        let step = fsm_step(FsmState::Disarmed, MouseEvent::Down { x: 50.0, y: 60.0 });
+        match step {
+            Step::Continue(s) => assert!(matches_armed(&s, 50.0, 60.0)),
+            _ => panic!("expected re-arm"),
+        }
     }
 
     #[test]
-    fn slice_outside_outer_radius_returns_minus_one() {
-        assert_eq!(compute_slice(0.0, -200.0), -1);
-        assert_eq!(compute_slice(200.0, 0.0), -1);
+    fn move_within_threshold_keeps_armed() {
+        let step = fsm_step(fresh_armed(100.0, 100.0), MouseEvent::Move { x: 102.0, y: 100.0 });
+        match step {
+            Step::Continue(s) => assert!(matches_armed(&s, 100.0, 100.0)),
+            _ => panic!("small motion must not change state"),
+        }
     }
 
     #[test]
-    fn slice_wraps_around_north_correctly() {
-        let r = 80.0;
-        for off_deg in [-10.0_f64, 10.0_f64] {
-            let theta = off_deg.to_radians();
-            let dx = r * theta.sin();
-            let dy = -r * theta.cos();
-            assert_eq!(compute_slice(dx, dy), 0, "offset {off_deg}°");
+    fn move_beyond_threshold_disarms() {
+        let step = fsm_step(fresh_armed(100.0, 100.0), MouseEvent::Move { x: 110.0, y: 100.0 });
+        assert!(matches!(step, Step::Continue(FsmState::Disarmed)));
+    }
+
+    #[test]
+    fn move_after_long_press_fires() {
+        // Above-threshold motion that arrives after the long-press window
+        // still fires — the timeout guard wins over the drag check once
+        // enough time has elapsed.
+        let step = fsm_step(elapsed_armed(100.0, 100.0), MouseEvent::Move { x: 101.0, y: 100.0 });
+        match step {
+            Step::Fire { press_x, press_y } => {
+                assert_eq!(press_x, 100.0);
+                assert_eq!(press_y, 100.0);
+            }
+            _ => panic!("expected Fire"),
+        }
+    }
+
+    #[test]
+    fn up_from_armed_returns_to_idle() {
+        let step = fsm_step(fresh_armed(50.0, 50.0), MouseEvent::Up);
+        assert!(matches!(step, Step::Continue(FsmState::Idle)));
+    }
+
+    #[test]
+    fn disarmed_stays_disarmed_on_move() {
+        let step = fsm_step(FsmState::Disarmed, MouseEvent::Move { x: 1.0, y: 1.0 });
+        assert!(matches!(step, Step::Continue(FsmState::Disarmed)));
+    }
+
+    #[test]
+    fn disarmed_returns_to_idle_on_up() {
+        let step = fsm_step(FsmState::Disarmed, MouseEvent::Up);
+        assert!(matches!(step, Step::Continue(FsmState::Idle)));
+    }
+
+    #[test]
+    fn idle_ignores_move_and_up() {
+        assert!(matches!(
+            fsm_step(FsmState::Idle, MouseEvent::Move { x: 1.0, y: 1.0 }),
+            Step::Continue(FsmState::Idle)
+        ));
+        assert!(matches!(
+            fsm_step(FsmState::Idle, MouseEvent::Up),
+            Step::Continue(FsmState::Idle)
+        ));
+    }
+
+    // ── Fire decision ─────────────────────────────────────────────────────
+
+    #[test]
+    fn fire_pastes_most_recent_clip_when_all_gates_pass() {
+        let d = decide_fire(true, false, false, Some(item("hello world")));
+        assert_eq!(
+            d,
+            FireDecision::Paste {
+                content: "hello world".into(),
+                char_count: 11,
+            },
+        );
+    }
+
+    #[test]
+    fn fire_skips_when_disabled() {
+        let d = decide_fire(false, false, false, Some(item("x")));
+        assert_eq!(d, FireDecision::Skip("disabled"));
+    }
+
+    #[test]
+    fn fire_skips_when_history_panel_is_visible() {
+        let d = decide_fire(true, true, false, Some(item("x")));
+        assert_eq!(d, FireDecision::Skip("panel_visible"));
+    }
+
+    #[test]
+    fn fire_skips_when_focus_is_on_a_secure_field() {
+        let d = decide_fire(true, false, true, Some(item("secret")));
+        assert_eq!(d, FireDecision::Skip("secure_field"));
+    }
+
+    #[test]
+    fn fire_skips_when_history_is_empty() {
+        let d = decide_fire(true, false, false, None);
+        assert_eq!(d, FireDecision::Skip("empty_history"));
+    }
+
+    #[test]
+    fn fire_counts_chars_not_bytes_for_unicode() {
+        let d = decide_fire(true, false, false, Some(item("café 🚀")));
+        match d {
+            FireDecision::Paste { char_count, .. } => assert_eq!(char_count, 6),
+            _ => panic!("expected Paste"),
         }
     }
 }

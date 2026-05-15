@@ -22,7 +22,7 @@ pub struct Settings {
     pub analytics_first_seen_version: String,
     #[serde(default)]
     pub last_seen_version: String,
-    /// Long-press anywhere to reveal a radial menu of recent clips. On by
+    /// Long-press anywhere to silently paste the most recent clip. On by
     /// default; users who don't want a global hold gesture can disable it
     /// in Preferences. Older settings.json files (pre-feature) deserialize
     /// with the `default_true` helper rather than `Default::default()`,

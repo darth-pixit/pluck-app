@@ -207,8 +207,8 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
           <span className="prefs-toggle-label">
             <strong>Press-and-hold to paste</strong>
             <span className="prefs-toggle-hint">
-              Hold the mouse for half a second anywhere to open a wheel of
-              recent clips. Drag to one, let go to paste.
+              Paste your most recent clip without reaching for ⌘V.
+              Long-press anywhere to fire.
             </span>
           </span>
         </label>
