@@ -444,14 +444,12 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
 
     // CanJoinAllSpaces | FullScreenAuxiliary | Transient | Stationary | IgnoresCycle
     const COLLECTION: u64 = (1 << 0) | (1 << 8) | (1 << 3) | (1 << 4) | (1 << 6);
-    // History panel sits at NSScreenSaverWindowLevel so it can float over other
-    // apps' full-screen Spaces. The transient overlay windows (nudge + radial)
-    // drop to NSPopUpMenuWindowLevel — Tahoe 26.x has been observed to silently
-    // demote/clip windows in the screen-saver band for unentitled apps, and
-    // pop-up menu level still puts us above any normal foreground app content
-    // while staying well clear of the restricted band.
+    // All overlay windows sit at NSScreenSaverWindowLevel (1000) so they can
+    // float over other apps' full-screen Spaces. Anything below ~1000 sits
+    // *behind* full-screen / maximised app content on macOS — the v0.4.5
+    // experiment of dropping nudge + radial to NSPopUpMenuWindowLevel (101)
+    // made them invisible whenever the user's focused app was maximised.
     const SCREENSAVER_LEVEL: isize = 1000;
-    const POPUP_MENU_LEVEL: isize = 101;
     const NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL: u64 = 1 << 7;
     // Tahoe's compositor has been observed to skip windows whose style mask
     // carries only NonactivatingPanel and no "content" bit. Adding
@@ -477,8 +475,7 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
             | NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW;
         let _: () = msg_send![ns, setStyleMask: new_mask];
 
-        let level: isize = if needs_key { SCREENSAVER_LEVEL } else { POPUP_MENU_LEVEL };
-        let _: () = msg_send![ns, setLevel: level];
+        let _: () = msg_send![ns, setLevel: SCREENSAVER_LEVEL];
         let _: () = msg_send![ns, setCollectionBehavior: COLLECTION];
         let _: () = msg_send![ns, setHidesOnDeactivate: false];
         let _: () = msg_send![ns, setMovableByWindowBackground: true];
@@ -775,10 +772,10 @@ pub fn run() {
             }
 
             // Configure the nudge window: needs_key=false → skip the
-            // class swap (nudges must never steal focus from whatever the
-            // user is typing in anyway) and drop to NSPopUpMenuWindowLevel
-            // so Tahoe doesn't demote/clip us in the restricted
-            // screen-saver band. Click-through so the user can never
+            // PluksPanel class swap (nudges must never steal focus from
+            // whatever the user is typing in anyway). Still uses
+            // NSScreenSaverWindowLevel so it floats over full-screen /
+            // maximised apps. Click-through so the user can never
             // accidentally interact with it.
             if let Some(win) = app.get_webview_window(WIN_NUDGE) {
                 configure_overlay_window(&win, false);
