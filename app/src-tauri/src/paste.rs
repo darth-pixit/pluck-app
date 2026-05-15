@@ -252,6 +252,10 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
         Ok(()) => eprintln!("[pluks] try_fire: show() ok"),
         Err(e) => eprintln!("[pluks] try_fire: show() failed: {:?}", e),
     }
+    // Force the radial onto the current Space even when Pluks isn't the
+    // active app — without this, win.show() is a no-op inside another
+    // app's full-screen Space.
+    crate::order_front_passive(&win);
 
     let payload = json!({ "items": items, "center": { "x": x, "y": y } });
     match win.emit(EVT_RADIAL_SHOW, &payload) {

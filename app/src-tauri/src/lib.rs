@@ -248,6 +248,10 @@ fn show_nudge_impl(app: &AppHandle, state: &Arc<AppState>, kind: &str, text: &st
         Ok(()) => eprintln!("[pluks] show_nudge: show() ok"),
         Err(e) => eprintln!("[pluks] show_nudge: show() failed: {:?}", e),
     }
+    // win.show() uses orderFront which is a no-op when our app isn't the
+    // active app — i.e. exactly when the user is inside another app's
+    // full-screen Space. orderFrontRegardless surfaces the panel anyway.
+    order_front_passive(&win);
     let payload = serde_json::json!({ "kind": kind, "text": text });
     match win.emit(EVT_NUDGE_SHOW, &payload) {
         Ok(()) => eprintln!("[pluks] show_nudge: emit({}) ok", EVT_NUDGE_SHOW),
@@ -308,6 +312,7 @@ fn show_test_radial_impl(app: &AppHandle) {
         Ok(()) => eprintln!("[pluks] test_radial: show() ok"),
         Err(e) => eprintln!("[pluks] test_radial: show() failed: {:?}", e),
     }
+    order_front_passive(&win);
     let payload = serde_json::json!({
         "items": items,
         "center": { "x": cx, "y": cy },
@@ -438,10 +443,17 @@ unsafe fn pluks_panel_class() -> *mut objc2::runtime::AnyObject {
     raw as *mut objc2::runtime::AnyObject
 }
 
-/// One-time native window tweaks so the panel overlays correctly — including
-/// over other apps' full-screen Spaces, while still receiving keyboard input.
+/// One-time native window tweaks so every overlay panel — history, nudge,
+/// radial — overlays correctly on top of other apps' full-screen Spaces.
+/// The PluksPanel class swap is applied unconditionally: Cocoa requires the
+/// host NSWindow to actually BE an NSPanel (not just carry the
+/// NonactivatingPanel style mask) for reliable overlay-over-fullscreen
+/// behavior. v0.4.5 skipped the swap for nudge + radial on a wrong guess
+/// that it was unsafe on Tahoe — the history panel proves daily that it's
+/// not. canBecomeKeyWindow=YES is harmless for click-through panels because
+/// no path ever calls makeKeyAndOrderFront on them.
 #[cfg(target_os = "macos")]
-fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bool) {
+fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -451,11 +463,6 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
 
     // CanJoinAllSpaces | FullScreenAuxiliary | Transient | Stationary | IgnoresCycle
     const COLLECTION: u64 = (1 << 0) | (1 << 8) | (1 << 3) | (1 << 4) | (1 << 6);
-    // All overlay windows sit at NSScreenSaverWindowLevel (1000) so they can
-    // float over other apps' full-screen Spaces. Anything below ~1000 sits
-    // *behind* full-screen / maximised app content on macOS — the v0.4.5
-    // experiment of dropping nudge + radial to NSPopUpMenuWindowLevel (101)
-    // made them invisible whenever the user's focused app was maximised.
     const SCREENSAVER_LEVEL: isize = 1000;
     const NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL: u64 = 1 << 7;
     // Tahoe's compositor has been observed to skip windows whose style mask
@@ -465,15 +472,9 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
     const NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW: u64 = 1 << 15;
 
     unsafe {
-        // The PluksPanel subclass is only needed for windows that must become
-        // key (the history panel — keyboard input). The class swap via
-        // object_setClass is fragile under Tahoe and unnecessary for
-        // click-through ambient surfaces, so skip it for nudge + radial.
-        if needs_key {
-            let cls = pluks_panel_class();
-            if !cls.is_null() {
-                object_setClass(ns, cls);
-            }
+        let cls = pluks_panel_class();
+        if !cls.is_null() {
+            object_setClass(ns, cls);
         }
 
         let current_mask: u64 = msg_send![ns, styleMask];
@@ -498,13 +499,29 @@ fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
     if ns.is_null() { return; }
     let ns = ns as *mut AnyObject;
 
-    // For a NonactivatingPanel we deliberately do NOT call
-    // activateIgnoringOtherApps — that would yank the user out of the
-    // foreground app's full-screen Space. orderFrontRegardless +
-    // makeKeyAndOrderFront brings the panel up in place.
     unsafe {
         let _: () = msg_send![ns, orderFrontRegardless];
         let _: () = msg_send![ns, makeKeyAndOrderFront: std::ptr::null_mut::<AnyObject>()];
+    }
+}
+
+/// Like [`order_front_regardless`] but skips `makeKeyAndOrderFront` so the
+/// panel doesn't try to become the key window. Required for nudge + radial:
+/// `orderFrontRegardless` is what gets the window onto another app's
+/// full-screen Space at all (plain `win.show()` uses `orderFront`, which
+/// does nothing when our app isn't active), but we must not steal keyboard
+/// focus from whatever the user is typing into.
+#[cfg(target_os = "macos")]
+pub(crate) fn order_front_passive<R: Runtime>(window: &WebviewWindow<R>) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ns) = window.ns_window() else { return };
+    if ns.is_null() { return; }
+    let ns = ns as *mut AnyObject;
+
+    unsafe {
+        let _: () = msg_send![ns, orderFrontRegardless];
     }
 }
 
@@ -522,16 +539,17 @@ fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
 //   - Win32 doesn't have macOS's per-Space "join all spaces" concept;
 //     alwaysOnTop is the closest equivalent.
 #[cfg(not(target_os = "macos"))]
-fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, _needs_key: bool) {
-    // The needs_key parameter is macOS-only (controls the NSPanel subclass
-    // swap that lets the history panel receive keyboard input). On
-    // Windows/Linux every overlay is a normal always-on-top window.
+fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.set_always_on_top(true);
     let _ = window.set_skip_taskbar(true);
 }
 #[cfg(not(target_os = "macos"))]
 fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.set_focus();
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn order_front_passive<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.set_always_on_top(true);
 }
 
 fn show_history_window<R: Runtime>(window: &WebviewWindow<R>, keyboard: bool) {
@@ -770,31 +788,19 @@ pub fn run() {
                 }
             }
 
-            // Configure the history window as a floating overlay panel.
-            // needs_key=true → PluksPanel subclass + NSScreenSaverWindowLevel
-            // so it floats over other apps' full-screen Spaces AND receives
-            // keyboard input.
+            // All three overlay windows get the same NSPanel treatment.
+            // The class swap is what lets them float over OTHER apps'
+            // full-screen Spaces; nudge + radial additionally ignore
+            // cursor events so the user can never click them by accident.
             if let Some(win) = app.get_webview_window(WIN_HISTORY) {
-                configure_overlay_window(&win, true);
+                configure_overlay_window(&win);
             }
-
-            // Configure the nudge window: needs_key=false → skip the
-            // PluksPanel class swap (nudges must never steal focus from
-            // whatever the user is typing in anyway). Still uses
-            // NSScreenSaverWindowLevel so it floats over full-screen /
-            // maximised apps. Click-through so the user can never
-            // accidentally interact with it.
             if let Some(win) = app.get_webview_window(WIN_NUDGE) {
-                configure_overlay_window(&win, false);
+                configure_overlay_window(&win);
                 let _ = win.set_ignore_cursor_events(true);
             }
-
-            // Configure the radial paste window. Same needs_key=false
-            // treatment as the nudge: pure visual surface, no keyboard
-            // input, click-through (all radial input is driven by
-            // paste.rs reading the global event tap directly).
             if let Some(win) = app.get_webview_window(paste::WIN_RADIAL) {
-                configure_overlay_window(&win, false);
+                configure_overlay_window(&win);
                 let _ = win.set_ignore_cursor_events(true);
             }
 
