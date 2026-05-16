@@ -20,3 +20,8 @@ Thumbs.db
 # Env
 .env
 *.env.local
+
+# Local-only notes (not committed)
+*.local.md
+TODO.local.md
+.todo/
