@@ -270,9 +270,23 @@ export default function PreferencesScreen({ onClose: _onClose }: Props) {
       <section className="prefs-section">
         <h3 className="prefs-section-title">Anonymous ID</h3>
         <p className="prefs-mono">{settings.anon_id}</p>
-        <button className="prefs-btn" onClick={onResetId} disabled={resetting}>
-          {resetting ? "Resetting…" : "Reset anonymous ID"}
-        </button>
+        <p className="prefs-toggle-hint">
+          Share this ID with support to help diagnose issues.
+        </p>
+        <div className="prefs-btn-row">
+          <button
+            className="prefs-btn"
+            onClick={() => {
+              track("support_email_clicked", { source: "preferences" });
+              invoke("open_support_email", { anonId: settings.anon_id });
+            }}
+          >
+            Email support
+          </button>
+          <button className="prefs-btn" onClick={onResetId} disabled={resetting}>
+            {resetting ? "Resetting…" : "Reset anonymous ID"}
+          </button>
+        </div>
       </section>
 
       <section className="prefs-section">

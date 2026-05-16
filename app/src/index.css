@@ -953,6 +953,7 @@ body.nudge-body {
   color: var(--accent-2);
 }
 .prefs-btn:disabled { opacity: 0.5; cursor: default; }
+.prefs-btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .prefs-meta { font-size: 11px; color: var(--muted); margin: 0; }
 .prefs-meta a { color: var(--accent-2); text-decoration: none; }
 .prefs-meta a:hover { text-decoration: underline; }
