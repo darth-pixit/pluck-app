@@ -205,6 +205,36 @@ test.describe("Content script", () => {
     expect(history.some((i) => i.text.includes("no clipboard available here"))).toBe(true);
   });
 
+  test("toast still appears when clipboard.writeText rejects", async ({ context, baseURL }) => {
+    // Office/enterprise browsers routinely block clipboard writes via policy.
+    // Pre-fix this swallowed the toast entirely — the user got no signal that
+    // their selection was captured. The no-clipboard iframe reproduces that
+    // rejection genuinely (Permissions-Policy: clipboard-write=()), so the
+    // toast must still appear inside it via the SELECTION-only path.
+    const page = await context.newPage();
+    await page.goto(baseURL);
+    const frame = page.frameLocator("#no-clipboard-iframe");
+    await frame.locator("#nc-prose").waitFor();
+    const ncFrame = page.frames().find((f) => /iframe-no-clipboard\.html$/.test(f.url()))!;
+    expect(ncFrame).toBeTruthy();
+    await ncFrame.evaluate(() => {
+      const el = document.getElementById("nc-prose")!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const s = window.getSelection();
+      s?.removeAllRanges();
+      s?.addRange(range);
+      const downEvt = new MouseEvent("mousedown", { button: 0, clientX: 0, clientY: 0, bubbles: true });
+      const upEvt = new MouseEvent("mouseup", { button: 0, clientX: 100, clientY: 100, bubbles: true });
+      document.dispatchEvent(downEvt);
+      document.dispatchEvent(upEvt);
+    });
+    await page.waitForTimeout(400);
+    await expect(frame.locator("#__pluks_toast")).toBeVisible();
+    const toastText = await frame.locator("#__pluks_toast").innerText();
+    expect(toastText).toContain("Snagged");
+  });
+
   test("history is capped at 100 entries", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);

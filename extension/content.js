@@ -324,6 +324,12 @@
         onWritten();
         return;
       }
+      // Both clipboard paths failed — usually an enterprise/office browser
+      // blocking writes via Permissions-Policy or DLP. The selection still
+      // landed in Pluks's own history (SELECTION message was sent above),
+      // so surface the toast anyway. Without this the user gets zero
+      // feedback and assumes the extension is broken.
+      showToast(text);
       try {
         if (window.Pluks) {
           var reason = "unknown";
