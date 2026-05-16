@@ -43,12 +43,15 @@ test.describe("Popup", () => {
   });
 
   test("clicking a row writes to clipboard and flashes ✓", async ({ context, extensionId, serviceWorker }) => {
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    // grantPermissions can restart the MV3 service worker, invalidating the
+    // cached `serviceWorker` Worker reference and leaving `chrome` undefined
+    // inside its evaluate. Seed storage first, then grant clipboard perms.
     await serviceWorker.evaluate(async () => {
       await chrome.storage.local.set({
         history: [{ text: "the copied phrase", ts: Date.now() }],
       });
     });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/popup.html`);
     await page.click(".item");
