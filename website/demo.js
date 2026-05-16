@@ -140,14 +140,19 @@
       errorEl.hidden = true;
     }
 
-    document.querySelectorAll(".btn-download").forEach(function (a) {
-      a.addEventListener("click", function (e) {
-        const href = a.getAttribute("href");
-        if (!href) return;
-        if (sessionStorage.getItem("pluks_dl_ok") === "1") return; // already submitted this session
-        e.preventDefault();
-        open(href, platformFromHref(href));
-      });
+    // Delegated click handler so the modal gate fires for any .btn-download
+    // element, even ones added after this script ran. The previous
+    // querySelectorAll().forEach() pattern only captured elements present at
+    // load time — any later DOM mutation (e.g. swapping out the hero CTA)
+    // would silently bypass the email-capture step.
+    document.addEventListener("click", function (e) {
+      const a = e.target.closest && e.target.closest(".btn-download");
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href) return;
+      if (sessionStorage.getItem("pluks_dl_ok") === "1") return; // already submitted this session
+      e.preventDefault();
+      open(href, platformFromHref(href));
     });
 
     closeBtn && closeBtn.addEventListener("click", function () { close("close_button"); });
