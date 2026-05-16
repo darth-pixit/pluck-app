@@ -349,6 +349,47 @@ fn open_input_monitoring_settings() {
     }
 }
 
+// Hand the user's default mail client a pre-filled draft to support. The
+// anon_id is folded into the subject so it's the first thing we see when the
+// mail lands — no need to ask "what's your ID?" in the first reply.
+#[tauri::command]
+fn open_support_email(anon_id: String) {
+    let subject = format!("Pluks support [{}]", anon_id);
+    let encoded_subject = url_encode(&subject);
+    let url = format!("mailto:parth.dixit@alumni.iitd.ac.in?subject={}", encoded_subject);
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn();
+    }
+}
+
+// Minimal percent-encoding for the bits of a mailto subject that would break
+// argv parsing or RFC 6068 parsing (spaces, brackets, &, etc.). Pulling in
+// the `url` crate just for this would be overkill.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 /// Called by the frontend after hiding the panel to paste into the previous app.
 /// Reactivates the captured target app first so Cmd+V lands in it specifically,
 /// regardless of where focus happens to be at this exact moment.
@@ -999,6 +1040,7 @@ pub fn run() {
             check_input_monitoring,
             open_accessibility_settings,
             open_input_monitoring_settings,
+            open_support_email,
             invoke_paste,
             show_nudge,
             settings::get_settings,
