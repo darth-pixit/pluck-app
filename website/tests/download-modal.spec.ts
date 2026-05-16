@@ -16,9 +16,16 @@ test.describe("Download modal", () => {
     );
   });
 
-  test("clicking Download opens the modal", async ({ page }) => {
+  test("clicking the hero Download CTA opens the modal", async ({ page }) => {
     await page.goto("/");
     await page.click("#dl-mac");
+    await expect(page.locator("#dl-modal")).toHaveClass(/show/);
+    await expect(page.locator("#dl-email")).toBeFocused();
+  });
+
+  test("clicking the nav Download CTA also opens the modal", async ({ page }) => {
+    await page.goto("/");
+    await page.click("nav .nav-cta");
     await expect(page.locator("#dl-modal")).toHaveClass(/show/);
     await expect(page.locator("#dl-email")).toBeFocused();
   });
