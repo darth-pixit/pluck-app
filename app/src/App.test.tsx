@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "./App";
-import { setInvokeHandler } from "./__tests__/setup";
+import { emitTauriEvent, setInvokeHandler } from "./__tests__/setup";
 
 function permissionHandler(opts: {
   ax?: boolean;
@@ -92,6 +93,31 @@ describe("App routing", () => {
     await waitFor(() => {
       expect(screen.getByText("snapshot one")).toBeInTheDocument();
       expect(screen.getByText("snapshot two")).toBeInTheDocument();
+    });
+  });
+
+  it("Cmd+Shift+V returns to history view when Preferences was open", async () => {
+    localStorage.clear();
+    localStorage.setItem("pluks.onboarding.v1.seen", "1");
+    localStorage.setItem("pluks.activation.v1.seen", "1");
+    setInvokeHandler(permissionHandler({ ax: true, im: true }));
+    render(<App />);
+
+    // Open Preferences via the gear button.
+    const gear = await screen.findByTitle("Preferences");
+    await userEvent.click(gear);
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText(/Search history/)).not.toBeInTheDocument();
+    });
+
+    // Simulate the global shortcut firing — Rust emits "keyboard-open".
+    await act(async () => {
+      emitTauriEvent("keyboard-open", undefined);
+    });
+
+    // Back on the history list.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search history/)).toBeInTheDocument();
     });
   });
 

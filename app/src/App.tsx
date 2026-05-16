@@ -485,8 +485,12 @@ export default function App() {
   }, [runNudge]);
 
   // Rust emits "keyboard-open" when CMD+Shift+V opens the panel.
+  // The shortcut is the user's "take me to my clipboard" gesture — always
+  // land on the history list, even if the panel was last hidden while on
+  // Preferences. Users who want to return to settings can still click ⚙.
   useEffect(() => {
     const unlisten = listen("keyboard-open", () => {
+      setPrefsOpen(false);
       setKeyboardMode(true);
       keyboardModeTime.current = Date.now();
       track("panel_opened", { trigger: "shortcut", had_focus_target: true });
