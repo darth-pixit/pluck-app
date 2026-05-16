@@ -64,14 +64,18 @@ a:hover { text-decoration: underline; }
 .nav-cta {
   background: var(--accent);
   color: #fff;
-  padding: 8px 18px;
+  padding: 8px 16px 8px 14px;
   border-radius: 8px;
   font-weight: 600;
   font-size: 14px;
   text-decoration: none;
   transition: background .15s, transform .1s;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 .nav-cta:hover { background: var(--accent-2); transform: translateY(-1px); text-decoration: none; }
+.nav-cta .apple-icon { width: 15px; height: 15px; margin-top: -1px; flex-shrink: 0; }
 
 /* ── Hero ────────────────────────────────────────────────────────────── */
 .hero {
@@ -209,7 +213,7 @@ a:hover { text-decoration: underline; }
 .btn-primary {
   background: var(--accent);
   color: #fff;
-  padding: 14px 28px;
+  padding: 14px 28px 14px 24px;
   border-radius: 10px;
   font-weight: 700;
   font-size: 15px;
@@ -217,9 +221,19 @@ a:hover { text-decoration: underline; }
   transition: background .15s, transform .1s;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .btn-primary:hover { background: var(--accent-2); transform: translateY(-2px); text-decoration: none; }
+.btn-primary .apple-icon { width: 18px; height: 18px; margin-top: -2px; flex-shrink: 0; }
+
+.hero-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  letter-spacing: .02em;
+  margin-top: 2px;
+  flex-basis: 100%;
+  text-align: center;
+}
 
 .btn-ghost {
   background: transparent;
@@ -746,7 +760,10 @@ kbd {
 .platform-card h3 { font-size: 17px; font-weight: 700; }
 .platform-card p { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
 
-.btn-download {
+/* Styles scoped to .platform-card — .btn-download is also used as a marker
+   class on the nav + hero CTAs to attach the download-modal handler, and we
+   don't want the full-width/block layout bleeding onto those. */
+.platform-card .btn-download {
   background: var(--accent);
   color: #fff;
   padding: 10px 20px;
@@ -760,7 +777,7 @@ kbd {
   margin-top: 4px;
   display: block;
 }
-.btn-download:hover { background: var(--accent-2); transform: translateY(-1px); text-decoration: none; }
+.platform-card .btn-download:hover { background: var(--accent-2); transform: translateY(-1px); text-decoration: none; }
 
 .source-note {
   color: var(--muted);

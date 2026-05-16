@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Page render", () => {
-  test("hero, stats, and download sections all render", async ({ page }) => {
+  test("hero, stats, and Mac download CTA all render", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("h1.hero-headline")).toBeVisible();
     await expect(page.locator(".stats-inner")).toBeVisible();
-    await expect(page.locator("#card-mac, #card-win, #card-linux").first()).toBeVisible();
+    await expect(page.locator("#dl-mac")).toBeVisible();
+    await expect(page.locator("#dl-mac")).toContainText(/Mac/i);
   });
 
   test("page has no JavaScript console errors", async ({ page }) => {

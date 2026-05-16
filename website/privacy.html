@@ -39,7 +39,12 @@
 <body>
 <nav class="nav">
   <a class="nav-brand" href="/" style="text-decoration:none;">pluks</a>
-  <a class="nav-cta" href="/#download">Download free</a>
+  <a class="nav-cta" href="/">
+    <svg class="apple-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+    </svg>
+    Download for Mac
+  </a>
 </nav>
 
 <div class="privacy-wrap">
@@ -49,8 +54,8 @@
   <div class="highlight-box">
     <strong>Short version:</strong> The text you copy never leaves your device. We do
     collect anonymous usage stats and crash reports to help us improve Pluks — you
-    can opt out in the desktop app's Preferences, in the browser-extension popup, or
-    by enabling "Do Not Track" on this website.
+    can opt out in the desktop app's Preferences, or by enabling "Do Not Track"
+    on this website.
   </div>
 
   <h2>What Pluks collects</h2>
@@ -69,22 +74,6 @@
   and password managers — Pluks does not simulate a copy, does not read the
   clipboard, and stores nothing in history.</p>
 
-  <h2>How the browser extension works</h2>
-  <p>The Pluks browser extension listens for <code>mouseup</code> events in your browser tabs
-  to detect text selections. When a selection is made, it copies the text using the
-  browser's standard Clipboard API and saves an entry to
-  <code>chrome.storage.local</code> (or <code>browser.storage.local</code> on Firefox).
-  This storage is local to your browser and is never synced or transmitted anywhere.</p>
-
-  <h2>Permissions explained</h2>
-  <ul>
-    <li><strong>storage</strong> — used to save your 100-item selection history locally in the browser.</li>
-    <li><strong>clipboardWrite</strong> — used to write selected text to your clipboard.</li>
-    <li><strong>Content script on all URLs</strong> — the extension must run on every page
-    you visit so it can detect text selections. It reads only the text you select;
-    it never reads page content, passwords, form data, or any other information.</li>
-  </ul>
-
   <h2>Analytics &amp; error reporting</h2>
   <p>Pluks uses two services to collect <strong>anonymous</strong>, opt-out telemetry:
   <a href="https://posthog.com" target="_blank" rel="noopener">PostHog</a> for usage
@@ -95,7 +84,7 @@
   <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">What we send</h3>
   <ul>
     <li>Event counts: panel opens, history clicks, smart-paste use, search use, downloads.</li>
-    <li>Coarse properties: app/extension version, OS or browser family, locale, screen size.</li>
+    <li>Coarse properties: app version, macOS major version, locale, screen size.</li>
     <li>Bucketed selection length (e.g. <code>11-100</code>, <code>101-1000</code>) — never the value.</li>
     <li>Error type, stack trace, and a hash of the error message.</li>
   </ul>
@@ -111,17 +100,12 @@
   <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">How to opt out</h3>
   <ul>
     <li><strong>Desktop app:</strong> click the ⚙ in the panel titlebar → toggle "Send anonymous usage stats" and "Send crash reports".</li>
-    <li><strong>Browser extension:</strong> open the popup → uncheck "Send anonymous stats" in the footer.</li>
     <li><strong>Website:</strong> enable "Do Not Track" in your browser, or append <code>?opt_out=1</code> to any pluks.app URL once.</li>
   </ul>
 
   <h2>Data storage</h2>
-  <p>All data is stored exclusively on your device:</p>
-  <ul>
-    <li>Desktop app: SQLite database in your local application data folder</li>
-    <li>Browser extension: <code>chrome.storage.local</code> / <code>browser.storage.local</code></li>
-  </ul>
-  <p>You can clear all history at any time from within the app or extension.</p>
+  <p>All data is stored exclusively on your device — a SQLite database in your local
+  application data folder. You can clear all history at any time from within the app.</p>
 
   <h2>Open source</h2>
   <p>Pluks is fully open source under the MIT license. You can inspect every line of code at
