@@ -55,8 +55,9 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, website, onboarding, trend] = await Promise.all([
 
+    // Traffic: app lifecycle events
     hogql(`
       SELECT
         event,
@@ -68,6 +69,7 @@ async function fetchMetrics() {
       GROUP BY event
     `),
 
+    // Product: core interaction events
     hogql(`
       SELECT
         event,
@@ -76,12 +78,14 @@ async function fetchMetrics() {
       FROM events
       WHERE event IN (
         'panel_opened','history_item_clicked','history_searched',
-        'history_item_pasted_keyboard','history_item_deleted','history_cleared'
+        'history_item_pasted_keyboard','history_item_deleted','history_cleared',
+        'nudge_shown','long_press_paste_toggled'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
       GROUP BY event
     `),
 
+    // Usage: core productivity + error events
     hogql(`
       SELECT
         event,
@@ -91,12 +95,13 @@ async function fetchMetrics() {
       WHERE event IN (
         'selection_captured','selection_capture_failed','smart_paste_used',
         'error_uncaught_js','error_tauri_invoke_failed','error_rust_panic',
-        'auto_copy_toggled','autostart_enabled'
+        'auto_copy_toggled','silent_paste_committed'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
       GROUP BY event
     `),
 
+    // Platform breakdown (app launches today)
     hogql(`
       SELECT
         properties.os_platform AS platform,
@@ -108,6 +113,7 @@ async function fetchMetrics() {
       ORDER BY launches DESC
     `),
 
+    // Surface breakdown (all events today)
     hogql(`
       SELECT
         properties.surface AS surface,
@@ -120,6 +126,7 @@ async function fetchMetrics() {
       ORDER BY events DESC
     `),
 
+    // Smart paste kind breakdown
     hogql(`
       SELECT
         properties.kind AS kind,
@@ -132,6 +139,7 @@ async function fetchMetrics() {
       LIMIT 6
     `),
 
+    // DAU: today vs yesterday
     hogql(`
       SELECT
         countIf(day = today())     AS dau_today,
@@ -144,9 +152,59 @@ async function fetchMetrics() {
       )
     `),
 
+    // WAU: unique users in last 7 days
+    hogql(`
+      SELECT count(DISTINCT distinct_id) AS wau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 7 DAY
+    `),
+
+    // Website traffic: pageviews + download funnel
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN (
+        '$pageview','download_clicked','download_modal_opened',
+        'download_form_submitted','github_link_clicked','demo_interacted'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
+    // Onboarding funnel
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN (
+        'onboarding_started','onboarding_completed',
+        'activation_started','activation_completed'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
+    // 7-day DAU trend (one row per day)
+    hogql(`
+      SELECT
+        toDate(timestamp) AS day,
+        count(DISTINCT distinct_id) AS dau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 7 DAY
+      GROUP BY day
+      ORDER BY day ASC
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, website, onboarding, trend };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,43 +226,102 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, website, onboarding, trend } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
   });
 
+  // Traffic
   const launches   = rowFromData(traffic, 'app_launched');
   const installs   = rowFromData(traffic, 'app_installed');
   const updates    = rowFromData(traffic, 'app_updated');
-  const panelOpens = rowFromData(product, 'panel_opened');
-  const histClicks = rowFromData(product, 'history_item_clicked');
-  const searches   = rowFromData(product, 'history_searched');
-  const pastes     = rowFromData(product, 'history_item_pasted_keyboard');
-  const deletes    = rowFromData(product, 'history_item_deleted');
-  const clears     = rowFromData(product, 'history_cleared');
-  const selections = rowFromData(usage, 'selection_captured');
-  const capFails   = rowFromData(usage, 'selection_capture_failed');
-  const smartTotal = rowFromData(usage, 'smart_paste_used');
-  const jsErrors   = rowFromData(usage, 'error_uncaught_js');
-  const tauriErrs  = rowFromData(usage, 'error_tauri_invoke_failed');
-  const rustPanics = rowFromData(usage, 'error_rust_panic');
+
+  // Product
+  const panelOpens  = rowFromData(product, 'panel_opened');
+  const histClicks  = rowFromData(product, 'history_item_clicked');
+  const searches    = rowFromData(product, 'history_searched');
+  const pastes      = rowFromData(product, 'history_item_pasted_keyboard');
+  const deletes     = rowFromData(product, 'history_item_deleted');
+  const clears      = rowFromData(product, 'history_cleared');
+  const nudges      = rowFromData(product, 'nudge_shown');
+  const longPress   = rowFromData(product, 'long_press_paste_toggled');
+
+  // Usage
+  const selections  = rowFromData(usage, 'selection_captured');
+  const capFails    = rowFromData(usage, 'selection_capture_failed');
+  const smartTotal  = rowFromData(usage, 'smart_paste_used');
+  const silentPaste = rowFromData(usage, 'silent_paste_committed');
+  const jsErrors    = rowFromData(usage, 'error_uncaught_js');
+  const tauriErrs   = rowFromData(usage, 'error_tauri_invoke_failed');
+  const rustPanics  = rowFromData(usage, 'error_rust_panic');
+
+  // Website
+  const pageviews   = rowFromData(website, '$pageview');
+  const dlModal     = rowFromData(website, 'download_modal_opened');
+  const dlClicked   = rowFromData(website, 'download_clicked');
+  const dlSubmit    = rowFromData(website, 'download_form_submitted');
+  const ghClicks    = rowFromData(website, 'github_link_clicked');
+  const demoInt     = rowFromData(website, 'demo_interacted');
+
+  // Onboarding
+  const obStarted   = rowFromData(onboarding, 'onboarding_started');
+  const obCompleted = rowFromData(onboarding, 'onboarding_completed');
+  const actStarted  = rowFromData(onboarding, 'activation_started');
+  const actCompleted = rowFromData(onboarding, 'activation_completed');
 
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
+  const wauTotal = wau[0]?.wau ?? 0;
 
-  const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
+  const totalErrors     = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
-  const errDelta = delta(totalErrors, totalErrorsYest);
+  const errDelta        = delta(totalErrors, totalErrorsYest);
 
   const platformTotal = platforms.reduce((s, r) => s + (r.launches ?? 0), 0) || 1;
   const surfaceTotal  = surfaces.reduce((s, r) => s + (r.events ?? 0), 0) || 1;
   const smartTotal_n  = smartPaste.reduce((s, r) => s + (r.uses ?? 0), 0) || 1;
 
+  const obRate = obStarted.today > 0
+    ? ((obCompleted.today / obStarted.today) * 100).toFixed(0)
+    : null;
+  const actRate = actStarted.today > 0
+    ? ((actCompleted.today / actStarted.today) * 100).toFixed(0)
+    : null;
+
+  const captureTotal = (selections.today ?? 0) + (capFails.today ?? 0);
+  const captureRate  = captureTotal > 0
+    ? ((selections.today / captureTotal) * 100).toFixed(1)
+    : null;
+
+  // Download funnel conversion
+  const dlConvRate = dlModal.today > 0
+    ? ((dlSubmit.today / dlModal.today) * 100).toFixed(0)
+    : null;
+
   const COLORS = { macos: '#6ee7b7', windows: '#60a5fa', linux: '#f59e0b', unknown: '#6b7280' };
   const SURF_COLORS = { app: '#6ee7b7', ext: '#a78bfa', web: '#fb923c', unknown: '#6b7280' };
 
+  // ── Sparkline (inline SVG) ────────────────────────────────────────────────────
+  function sparkline(rows) {
+    if (!rows || rows.length < 2) return '';
+    const values = rows.map(r => r.dau ?? 0);
+    const max = Math.max(...values, 1);
+    const W = 200, H = 36, PAD = 2;
+    const pts = values.map((v, i) => {
+      const x = PAD + (i / (values.length - 1)) * (W - PAD * 2);
+      const y = PAD + (1 - v / max) * (H - PAD * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:8px auto 0;">
+        <polyline points="${pts.join(' ')}" fill="none" stroke="#6ee7b7" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${pts[pts.length-1].split(',')[0]}" cy="${pts[pts.length-1].split(',')[1]}" r="2.5" fill="#6ee7b7"/>
+      </svg>`;
+  }
+
+  // ── Reusable components ───────────────────────────────────────────────────────
   function card(label, value, d, invertDelta = false) {
     const { pct, dir } = d;
     let dirColor = '#6b7280';
@@ -229,7 +346,9 @@ function buildHtml(metrics) {
     let color = '#6b7280'; let arrow = '→';
     if (dir === 'up') { color = invertDelta ? '#ef4444' : '#10b981'; arrow = '↑'; }
     if (dir === 'down') { color = invertDelta ? '#10b981' : '#ef4444'; arrow = '↓'; }
-    const badge = pct !== null ? `<span style="color:${color};font-size:11px;">${arrow} ${pct}%</span>` : `<span style="color:#374151;font-size:11px;">—</span>`;
+    const badge = pct !== null
+      ? `<span style="color:${color};font-size:11px;">${arrow} ${pct}%</span>`
+      : `<span style="color:#374151;font-size:11px;">—</span>`;
     return `
       <tr>
         <td style="padding:10px 16px;font-size:13px;color:#d1d5db;border-bottom:1px solid #1c1c1c;">${label}</td>
@@ -264,8 +383,22 @@ function buildHtml(metrics) {
       </td>`;
   }
 
-  const platformBar   = barSegments(platforms, platformTotal, COLORS);
-  const surfaceBar    = barSegments(surfaces.map(s => ({...s, platform: s.surface})), surfaceTotal, SURF_COLORS);
+  function funnelStep(label, value, total, color = '#6ee7b7') {
+    const pct = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:#9ca3af;">${label}</span>
+          <span style="font-size:12px;font-weight:600;color:#f9fafb;">${num(value)} <span style="color:#6b7280;font-weight:400;">(${pct}%)</span></span>
+        </div>
+        <div style="height:4px;background:#1c1c1c;border-radius:2px;">
+          <div style="height:4px;background:${color};border-radius:2px;width:${Math.min(pct, 100)}%;"></div>
+        </div>
+      </div>`;
+  }
+
+  const platformBar    = barSegments(platforms, platformTotal, COLORS);
+  const surfaceBar     = barSegments(surfaces.map(s => ({...s, platform: s.surface})), surfaceTotal, SURF_COLORS);
   const platformLegend = platforms.map(p => legendItem(p.platform || 'unknown', p.launches ?? 0, platformTotal, COLORS)).join('');
   const surfaceLegend  = surfaces.map(s => legendItem(s.surface || 'unknown', s.events ?? 0, surfaceTotal, SURF_COLORS)).join('');
 
@@ -296,15 +429,24 @@ function buildHtml(metrics) {
     <div style="font-size:13px;color:#4b5563;margin-top:6px;">${date} &nbsp;·&nbsp; Asia/Kolkata</div>
   </div>
 
-  <!-- DAU hero -->
-  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
-    <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
-    <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
-    ${dauDelta.pct !== null
-      ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
-           ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
-         </div>`
-      : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+  <!-- DAU + WAU hero -->
+  <div style="display:flex;gap:12px;margin:24px 0;">
+    <div style="flex:2;background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;text-align:center;">
+      <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
+      <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
+      ${dauDelta.pct !== null
+        ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
+             ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)})
+           </div>`
+        : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+      ${sparkline(trend)}
+      <div style="font-size:11px;color:#374151;margin-top:4px;">7-day trend</div>
+    </div>
+    <div style="flex:1;background:#111;border:1px solid #222;border-radius:12px;padding:24px;text-align:center;display:flex;flex-direction:column;justify-content:center;">
+      <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">WAU (7d)</div>
+      <div style="font-size:36px;font-weight:800;color:#a78bfa;letter-spacing:-1px;">${num(wauTotal)}</div>
+      <div style="font-size:11px;color:#374151;margin-top:8px;">unique users</div>
+    </div>
   </div>
 
   <!-- ── Traffic ── -->
@@ -316,6 +458,37 @@ function buildHtml(metrics) {
       ${card('Updates', updates.today, delta(updates.today, updates.yesterday))}
     </tr>
   </table>
+
+  <!-- ── Website Traffic ── -->
+  ${sectionHeader('🌍 Website Traffic')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Event</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Page views', pageviews.today, pageviews.yesterday)}
+      ${tableRow('Demo interactions', demoInt.today, demoInt.yesterday)}
+      ${tableRow('GitHub link clicks', ghClicks.today, ghClicks.yesterday)}
+      ${tableRow('Download modal opened', dlModal.today, dlModal.yesterday)}
+      ${tableRow('Download clicked', dlClicked.today, dlClicked.yesterday)}
+      ${tableRow('Download form submitted', dlSubmit.today, dlSubmit.yesterday)}
+    </tbody>
+  </table>
+
+  <!-- Download funnel -->
+  ${(dlModal.today + dlModal.yesterday) > 0 ? `
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:16px;margin-top:12px;">
+    <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Download Funnel (today)</div>
+    ${funnelStep('Modal opened', dlModal.today, dlModal.today, '#60a5fa')}
+    ${funnelStep('Download clicked', dlClicked.today, dlModal.today, '#6ee7b7')}
+    ${funnelStep('Form submitted (leads)', dlSubmit.today, dlModal.today, '#a78bfa')}
+    ${dlConvRate !== null ? `<div style="font-size:12px;color:#6b7280;margin-top:8px;text-align:right;">Lead conversion: <span style="color:#a78bfa;font-weight:600;">${dlConvRate}%</span></div>` : ''}
+  </div>` : ''}
 
   <!-- ── Product ── -->
   ${sectionHeader('📦 Product')}
@@ -333,10 +506,30 @@ function buildHtml(metrics) {
       ${tableRow('History item clicked', histClicks.today, histClicks.yesterday)}
       ${tableRow('Pasted via keyboard', pastes.today, pastes.yesterday)}
       ${tableRow('Searches performed', searches.today, searches.yesterday)}
+      ${tableRow('Nudges shown', nudges.today, nudges.yesterday)}
+      ${tableRow('Long-press paste toggled', longPress.today, longPress.yesterday)}
       ${tableRow('Items deleted', deletes.today, deletes.yesterday)}
       ${tableRow('History cleared', clears.today, clears.yesterday, true)}
     </tbody>
   </table>
+
+  <!-- Onboarding funnel -->
+  ${(obStarted.today + obStarted.yesterday + actStarted.today + actStarted.yesterday) > 0 ? `
+  ${sectionHeader('🎯 Onboarding & Activation')}
+  <div style="display:flex;gap:12px;">
+    <div style="flex:1;background:#111;border:1px solid #222;border-radius:10px;padding:16px;">
+      <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Onboarding (today)</div>
+      ${funnelStep('Started', obStarted.today, obStarted.today, '#60a5fa')}
+      ${funnelStep('Completed', obCompleted.today, obStarted.today, '#6ee7b7')}
+      ${obRate !== null ? `<div style="font-size:12px;color:#6b7280;margin-top:8px;text-align:right;">Completion: <span style="color:#6ee7b7;font-weight:600;">${obRate}%</span></div>` : ''}
+    </div>
+    <div style="flex:1;background:#111;border:1px solid #222;border-radius:10px;padding:16px;">
+      <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Activation (today)</div>
+      ${funnelStep('Started', actStarted.today, actStarted.today, '#f59e0b')}
+      ${funnelStep('Completed', actCompleted.today, actStarted.today, '#6ee7b7')}
+      ${actRate !== null ? `<div style="font-size:12px;color:#6b7280;margin-top:8px;text-align:right;">Completion: <span style="color:#6ee7b7;font-weight:600;">${actRate}%</span></div>` : ''}
+    </div>
+  </div>` : ''}
 
   <!-- ── Usage ── -->
   ${sectionHeader('⚡ Usage')}
@@ -347,6 +540,23 @@ function buildHtml(metrics) {
       ${card('Errors', totalErrors, delta(totalErrors, totalErrorsYest), true)}
     </tr>
   </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;">
+    <tr>
+      ${card('Silent pastes', silentPaste.today, delta(silentPaste.today, silentPaste.yesterday))}
+      <td style="width:33%;padding:6px;"></td>
+      <td style="width:33%;padding:6px;"></td>
+    </tr>
+  </table>
+
+  <!-- Capture success rate -->
+  ${captureRate !== null ? `
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;">
+    <span style="font-size:13px;color:#9ca3af;">Capture success rate today:&nbsp;</span>
+    <span style="font-size:14px;font-weight:700;color:${parseFloat(captureRate) >= 95 ? '#10b981' : '#f59e0b'};">
+      ${captureRate}%
+    </span>
+    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed of ${num(captureTotal)} total)</span>
+  </div>` : ''}
 
   <!-- Smart paste breakdown -->
   ${smartPaste.length > 0 ? `
@@ -361,16 +571,6 @@ function buildHtml(metrics) {
       </thead>
       <tbody>${smartPasteRows}</tbody>
     </table>
-  </div>` : ''}
-
-  <!-- Capture fail rate -->
-  ${(selections.today + capFails.today) > 0 ? `
-  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;display:flex;align-items:center;">
-    <span style="font-size:13px;color:#9ca3af;">Capture success rate today:&nbsp;</span>
-    <span style="font-size:14px;font-weight:700;color:${((selections.today / (selections.today + capFails.today)) * 100) >= 95 ? '#10b981' : '#f59e0b'};">
-      ${((selections.today / (selections.today + capFails.today)) * 100).toFixed(1)}%
-    </span>
-    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed)</span>
   </div>` : ''}
 
   <!-- ── Platforms ── -->
