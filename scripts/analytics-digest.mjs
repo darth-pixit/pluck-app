@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, funnel, engagement] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,39 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())    AS today,
+        countIf(toDate(timestamp) = yesterday()) AS yesterday
+      FROM events
+      WHERE event IN (
+        'onboarding_started','onboarding_completed',
+        'activation_started','activation_completed',
+        'permission_granted','permission_denied_or_skipped'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())    AS today,
+        countIf(toDate(timestamp) = yesterday()) AS yesterday
+      FROM events
+      WHERE event IN (
+        'silent_paste_committed','silent_paste_suppressed',
+        'nudge_shown','nudge_suppressed',
+        'long_press_paste_toggled'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, funnel, engagement };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,7 +198,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, funnel, engagement } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -197,6 +227,19 @@ function buildHtml(metrics) {
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
   const errDelta = delta(totalErrors, totalErrorsYest);
+
+  const onboardStart  = rowFromData(funnel, 'onboarding_started');
+  const onboardDone   = rowFromData(funnel, 'onboarding_completed');
+  const activStart    = rowFromData(funnel, 'activation_started');
+  const activDone     = rowFromData(funnel, 'activation_completed');
+  const permGranted   = rowFromData(funnel, 'permission_granted');
+  const permDenied    = rowFromData(funnel, 'permission_denied_or_skipped');
+
+  const silentCommit  = rowFromData(engagement, 'silent_paste_committed');
+  const silentSuppr   = rowFromData(engagement, 'silent_paste_suppressed');
+  const nudgeShown    = rowFromData(engagement, 'nudge_shown');
+  const nudgeSuppr    = rowFromData(engagement, 'nudge_suppressed');
+  const longPressToggle = rowFromData(engagement, 'long_press_paste_toggled');
 
   const platformTotal = platforms.reduce((s, r) => s + (r.launches ?? 0), 0) || 1;
   const surfaceTotal  = surfaces.reduce((s, r) => s + (r.events ?? 0), 0) || 1;
@@ -383,6 +426,47 @@ function buildHtml(metrics) {
       <tr>${platformLegend}</tr>
     </table>
   </div>
+
+  <!-- ── Onboarding Funnel ── -->
+  ${sectionHeader('🚀 Onboarding & Activation')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Step</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Onboarding started',   onboardStart.today, onboardStart.yesterday)}
+      ${tableRow('Onboarding completed', onboardDone.today,  onboardDone.yesterday)}
+      ${tableRow('Activation started',   activStart.today,   activStart.yesterday)}
+      ${tableRow('Activation completed', activDone.today,    activDone.yesterday)}
+      ${tableRow('Permission granted',   permGranted.today,  permGranted.yesterday)}
+      ${tableRow('Permission denied/skipped', permDenied.today, permDenied.yesterday, true)}
+    </tbody>
+  </table>
+
+  <!-- ── Engagement ── -->
+  ${sectionHeader('💡 Engagement & Habits')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Metric</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Silent paste committed',  silentCommit.today,    silentCommit.yesterday)}
+      ${tableRow('Silent paste suppressed', silentSuppr.today,     silentSuppr.yesterday, true)}
+      ${tableRow('Nudges shown',            nudgeShown.today,      nudgeShown.yesterday)}
+      ${tableRow('Nudges suppressed',       nudgeSuppr.today,      nudgeSuppr.yesterday, true)}
+      ${tableRow('Long-press toggled',      longPressToggle.today, longPressToggle.yesterday)}
+    </tbody>
+  </table>
 
   <!-- ── Surfaces ── -->
   ${sectionHeader('🌐 Surface Breakdown')}
