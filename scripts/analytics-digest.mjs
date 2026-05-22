@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, website] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,23 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN (
+        '$pageview','download_clicked','download_form_submitted',
+        'download_form_invalid','github_link_clicked','demo_completed'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, website };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,7 +182,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, website } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -189,6 +203,17 @@ function buildHtml(metrics) {
   const jsErrors   = rowFromData(usage, 'error_uncaught_js');
   const tauriErrs  = rowFromData(usage, 'error_tauri_invoke_failed');
   const rustPanics = rowFromData(usage, 'error_rust_panic');
+
+  const pageviews      = rowFromData(website, '$pageview');
+  const dlClicked      = rowFromData(website, 'download_clicked');
+  const dlSubmitted    = rowFromData(website, 'download_form_submitted');
+  const dlInvalid      = rowFromData(website, 'download_form_invalid');
+  const ghClicked      = rowFromData(website, 'github_link_clicked');
+  const demoCompleted  = rowFromData(website, 'demo_completed');
+
+  const dlConvRate = dlClicked.today > 0
+    ? ((dlSubmitted.today / dlClicked.today) * 100).toFixed(1)
+    : null;
 
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
@@ -394,6 +419,37 @@ function buildHtml(metrics) {
       <tr>${surfaceLegend}</tr>
     </table>
   </div>
+
+  <!-- ── Website ── -->
+  ${sectionHeader('🌍 Website')}
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      ${card('Pageviews', pageviews.today, delta(pageviews.today, pageviews.yesterday))}
+      ${card('Download clicks', dlClicked.today, delta(dlClicked.today, dlClicked.yesterday))}
+      ${card('Forms submitted', dlSubmitted.today, delta(dlSubmitted.today, dlSubmitted.yesterday))}
+    </tr>
+  </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;margin-top:12px;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Event</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('GitHub link clicked', ghClicked.today, ghClicked.yesterday)}
+      ${tableRow('Demo completed', demoCompleted.today, demoCompleted.yesterday)}
+      ${tableRow('Form invalid (bounced)', dlInvalid.today, dlInvalid.yesterday, true)}
+      <tr>
+        <td style="padding:10px 16px;font-size:13px;color:#d1d5db;border-bottom:1px solid #1c1c1c;">Download conversion rate</td>
+        <td colspan="3" style="padding:10px 16px;font-size:13px;font-weight:700;color:${dlConvRate !== null ? (parseFloat(dlConvRate) >= 30 ? '#10b981' : '#f59e0b') : '#6b7280'};text-align:right;border-bottom:1px solid #1c1c1c;">
+          ${dlConvRate !== null ? `${dlConvRate}%` : '—'}
+        </td>
+      </tr>
+    </tbody>
+  </table>
 
   <!-- Footer -->
   <div style="text-align:center;padding:32px 0 16px;border-top:1px solid #111;margin-top:32px;">
