@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, dauTrend, installTrend, d1retention] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,62 @@ async function fetchMetrics() {
       )
     `),
 
+    // WAU and MAU
+    hogql(`
+      SELECT
+        countDistinctIf(distinct_id, timestamp >= now() - INTERVAL 7 DAY)  AS wau,
+        countDistinctIf(distinct_id, timestamp >= now() - INTERVAL 30 DAY) AS mau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 30 DAY
+    `),
+
+    // 7-day DAU trend (for sparkline)
+    hogql(`
+      SELECT
+        toDate(timestamp) AS day,
+        countDistinct(distinct_id) AS dau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= today() - 7
+      GROUP BY day
+      ORDER BY day ASC
+      LIMIT 8
+    `),
+
+    // 7-day install trend (for sparkline)
+    hogql(`
+      SELECT
+        toDate(timestamp) AS day,
+        count() AS installs
+      FROM events
+      WHERE event = 'app_installed'
+        AND timestamp >= today() - 7
+      GROUP BY day
+      ORDER BY day ASC
+      LIMIT 8
+    `),
+
+    // D1 retention: users who installed yesterday and launched today
+    hogql(`
+      SELECT
+        countIf(installed_yesterday = 1) AS new_users_yesterday,
+        countIf(installed_yesterday = 1 AND launched_today = 1) AS d1_retained
+      FROM (
+        SELECT
+          distinct_id,
+          maxIf(1, event = 'app_installed' AND toDate(timestamp) = yesterday()) AS installed_yesterday,
+          maxIf(1, event = 'app_launched'  AND toDate(timestamp) = today())     AS launched_today
+        FROM events
+        WHERE timestamp >= now() - INTERVAL 2 DAY
+          AND event IN ('app_installed', 'app_launched')
+        GROUP BY distinct_id
+      )
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, dauTrend, installTrend, d1retention };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -165,10 +218,33 @@ function rowFromData(rows, eventName) {
   return rows.find(r => r.event === eventName) ?? { event: eventName, today: 0, yesterday: 0 };
 }
 
+// Build a Unicode block sparkline from an array of numbers
+function sparkline(values) {
+  if (!values || values.length === 0) return '—';
+  const bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  return values.map(v => bars[Math.round(((v - min) / range) * 7)]).join('');
+}
+
+// Fill a sparse day-indexed series into a fixed-length array (oldest → newest)
+function fillSeries(rows, dayKey, valueKey, days = 7) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const map = new Map(rows.map(r => [String(r[dayKey]).slice(0, 10), Number(r[valueKey] ?? 0)]));
+  return Array.from({ length: days }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (days - 1 - i));
+    const key = d.toISOString().slice(0, 10);
+    return map.get(key) ?? 0;
+  });
+}
+
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, dauTrend, installTrend, d1retention } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -194,6 +270,13 @@ function buildHtml(metrics) {
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
 
+  const wau = wauMau[0]?.wau ?? 0;
+  const mau = wauMau[0]?.mau ?? 0;
+
+  const newUsersYesterday = d1retention[0]?.new_users_yesterday ?? 0;
+  const d1Retained        = d1retention[0]?.d1_retained ?? 0;
+  const d1Rate            = newUsersYesterday > 0 ? ((d1Retained / newUsersYesterday) * 100).toFixed(0) : null;
+
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
   const errDelta = delta(totalErrors, totalErrorsYest);
@@ -201,6 +284,11 @@ function buildHtml(metrics) {
   const platformTotal = platforms.reduce((s, r) => s + (r.launches ?? 0), 0) || 1;
   const surfaceTotal  = surfaces.reduce((s, r) => s + (r.events ?? 0), 0) || 1;
   const smartTotal_n  = smartPaste.reduce((s, r) => s + (r.uses ?? 0), 0) || 1;
+
+  const dauSeries     = fillSeries(dauTrend, 'day', 'dau', 7);
+  const installSeries = fillSeries(installTrend, 'day', 'installs', 7);
+  const dauSpark      = sparkline(dauSeries);
+  const installSpark  = sparkline(installSeries);
 
   const COLORS = { macos: '#6ee7b7', windows: '#60a5fa', linux: '#f59e0b', unknown: '#6b7280' };
   const SURF_COLORS = { app: '#6ee7b7', ext: '#a78bfa', web: '#fb923c', unknown: '#6b7280' };
@@ -278,6 +366,14 @@ function buildHtml(metrics) {
         </tr>`).join('')
     : `<tr><td colspan="3" style="padding:16px;text-align:center;color:#374151;font-size:13px;">No smart paste usage today</td></tr>`;
 
+  const d1Badge = d1Rate !== null
+    ? `<div style="display:inline-block;background:${Number(d1Rate) >= 30 ? '#0d2b1e' : '#2b0d0d'};border:1px solid ${Number(d1Rate) >= 30 ? '#1c4a30' : '#4a1c1c'};border-radius:8px;padding:8px 16px;margin-top:16px;">
+        <span style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;">D1 Retention</span>
+        <span style="font-size:20px;font-weight:700;color:${Number(d1Rate) >= 30 ? '#6ee7b7' : '#f87171'};margin-left:12px;">${d1Rate}%</span>
+        <span style="font-size:12px;color:#4b5563;margin-left:8px;">${num(d1Retained)} of ${num(newUsersYesterday)} new users came back</span>
+      </div>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -296,8 +392,9 @@ function buildHtml(metrics) {
     <div style="font-size:13px;color:#4b5563;margin-top:6px;">${date} &nbsp;·&nbsp; Asia/Kolkata</div>
   </div>
 
-  <!-- DAU hero -->
+  <!-- DAU / WAU / MAU hero -->
   <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+    <!-- DAU big number -->
     <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
     <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
     ${dauDelta.pct !== null
@@ -305,6 +402,50 @@ function buildHtml(metrics) {
            ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
          </div>`
       : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+
+    <!-- WAU / MAU row -->
+    <div style="display:flex;justify-content:center;gap:32px;margin-top:20px;padding-top:16px;border-top:1px solid #1c2e22;">
+      <div>
+        <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;">WAU (7d)</div>
+        <div style="font-size:22px;font-weight:700;color:#a7f3d0;margin-top:4px;">${num(wau)}</div>
+      </div>
+      <div style="width:1px;background:#1c2e22;"></div>
+      <div>
+        <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;">MAU (30d)</div>
+        <div style="font-size:22px;font-weight:700;color:#a7f3d0;margin-top:4px;">${num(mau)}</div>
+      </div>
+    </div>
+
+    <!-- D1 retention badge -->
+    ${d1Badge}
+  </div>
+
+  <!-- ── 7-Day Trend ── -->
+  ${sectionHeader('📈 7-Day Trend')}
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:20px;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding:8px 0;width:50%;padding-right:16px;border-right:1px solid #1c1c1c;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Active Users / Day</div>
+          <div style="font-size:22px;font-family:'Courier New',monospace;letter-spacing:2px;color:#6ee7b7;">${dauSpark}</div>
+          <div style="font-size:11px;color:#4b5563;margin-top:6px;">
+            ${dauSeries.map((v, i) => {
+              const d = new Date(); d.setDate(d.getDate() - (6 - i));
+              return `<span style="display:inline-block;width:${Math.floor(100/7)}%;text-align:center;">${v}</span>`;
+            }).join('')}
+          </div>
+        </td>
+        <td style="padding:8px 0;width:50%;padding-left:16px;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">New Installs / Day</div>
+          <div style="font-size:22px;font-family:'Courier New',monospace;letter-spacing:2px;color:#60a5fa;">${installSpark}</div>
+          <div style="font-size:11px;color:#4b5563;margin-top:6px;">
+            ${installSeries.map((v, i) => {
+              return `<span style="display:inline-block;width:${Math.floor(100/7)}%;text-align:center;">${v}</span>`;
+            }).join('')}
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 
   <!-- ── Traffic ── -->
