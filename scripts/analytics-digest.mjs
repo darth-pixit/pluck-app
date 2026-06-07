@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, capFailReasons] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,42 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT count() AS wau
+      FROM (
+        SELECT DISTINCT distinct_id
+        FROM events
+        WHERE event = 'app_launched'
+          AND timestamp >= now() - INTERVAL 7 DAY
+      )
+    `),
+
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())    AS today,
+        countIf(toDate(timestamp) = yesterday()) AS yesterday
+      FROM events
+      WHERE event IN ('onboarding_started','onboarding_completed','activation_completed')
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
+    hogql(`
+      SELECT
+        properties.reason AS reason,
+        count() AS cnt
+      FROM events
+      WHERE event = 'selection_capture_failed'
+        AND toDate(timestamp) = today()
+      GROUP BY reason
+      ORDER BY cnt DESC
+      LIMIT 5
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, capFailReasons };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,7 +201,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, capFailReasons } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -193,6 +226,13 @@ function buildHtml(metrics) {
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
+
+  const wauCount = wau[0]?.wau ?? 0;
+
+  const obStarted   = rowFromData(onboarding, 'onboarding_started');
+  const obCompleted = rowFromData(onboarding, 'onboarding_completed');
+  const acCompleted = rowFromData(onboarding, 'activation_completed');
+  const obRate = obStarted.today > 0 ? ((obCompleted.today / obStarted.today) * 100).toFixed(0) : null;
 
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
@@ -296,15 +336,26 @@ function buildHtml(metrics) {
     <div style="font-size:13px;color:#4b5563;margin-top:6px;">${date} &nbsp;·&nbsp; Asia/Kolkata</div>
   </div>
 
-  <!-- DAU hero -->
-  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
-    <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
-    <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
-    ${dauDelta.pct !== null
-      ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
-           ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
-         </div>`
-      : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+  <!-- DAU / WAU hero -->
+  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="width:50%;text-align:center;padding:8px;border-right:1px solid #1c2e22;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
+          <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
+          ${dauDelta.pct !== null
+            ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
+                 ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)})
+               </div>`
+            : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+        </td>
+        <td style="width:50%;text-align:center;padding:8px;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Weekly Active Users</div>
+          <div style="font-size:48px;font-weight:800;color:#a78bfa;letter-spacing:-2px;">${num(wauCount)}</div>
+          <div style="font-size:13px;color:#6b7280;margin-top:4px;">rolling 7 days</div>
+        </td>
+      </tr>
+    </table>
   </div>
 
   <!-- ── Traffic ── -->
@@ -316,6 +367,30 @@ function buildHtml(metrics) {
       ${card('Updates', updates.today, delta(updates.today, updates.yesterday))}
     </tr>
   </table>
+
+  <!-- ── Onboarding funnel ── -->
+  ${sectionHeader('🎯 Onboarding Funnel')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Step</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Onboarding started', obStarted.today, obStarted.yesterday)}
+      ${tableRow('Onboarding completed', obCompleted.today, obCompleted.yesterday)}
+      ${tableRow('Activation completed', acCompleted.today, acCompleted.yesterday)}
+    </tbody>
+  </table>
+  ${obRate !== null ? `
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:12px 16px;margin-top:8px;">
+    <span style="font-size:13px;color:#9ca3af;">Onboarding completion rate today:&nbsp;</span>
+    <span style="font-size:14px;font-weight:700;color:${parseInt(obRate) >= 60 ? '#10b981' : parseInt(obRate) >= 30 ? '#f59e0b' : '#ef4444'};">${obRate}%</span>
+    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(obCompleted.today)} of ${num(obStarted.today)} started)</span>
+  </div>` : ''}
 
   <!-- ── Product ── -->
   ${sectionHeader('📦 Product')}
@@ -363,14 +438,22 @@ function buildHtml(metrics) {
     </table>
   </div>` : ''}
 
-  <!-- Capture fail rate -->
+  <!-- Capture fail rate + reasons -->
   ${(selections.today + capFails.today) > 0 ? `
-  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;display:flex;align-items:center;">
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;">
     <span style="font-size:13px;color:#9ca3af;">Capture success rate today:&nbsp;</span>
     <span style="font-size:14px;font-weight:700;color:${((selections.today / (selections.today + capFails.today)) * 100) >= 95 ? '#10b981' : '#f59e0b'};">
       ${((selections.today / (selections.today + capFails.today)) * 100).toFixed(1)}%
     </span>
     <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed)</span>
+    ${capFailReasons.length > 0 ? `
+    <div style="margin-top:10px;border-top:1px solid #1c1c1c;padding-top:10px;">
+      ${capFailReasons.map(r => `
+        <div style="display:flex;justify-content:space-between;padding:3px 0;">
+          <span style="font-size:12px;color:#6b7280;">${r.reason || 'unknown'}</span>
+          <span style="font-size:12px;color:#9ca3af;font-weight:600;">${num(r.cnt)}</span>
+        </div>`).join('')}
+    </div>` : ''}
   </div>` : ''}
 
   <!-- ── Platforms ── -->
