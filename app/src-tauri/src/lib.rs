@@ -193,6 +193,24 @@ fn copy_text(text: String) -> bool {
     write_clipboard(&text)
 }
 
+/// Record a clip into history directly from the frontend and broadcast it as a
+/// new selection so the live panel updates.
+///
+/// The background copy processor skips capture whenever the history panel is
+/// visible (see `start_copy_processor`). During the activation tour the panel
+/// *is* the visible window, so the sample clips the user copies while learning
+/// the gesture would otherwise never make it into history — leaving them with
+/// an empty panel the moment onboarding ends. This command lets the tour bank
+/// those clips itself. Insert is top-row deduped, so calling it repeatedly for
+/// the same text (the tour fires on every `selectionchange`) is a no-op after
+/// the first landing.
+#[tauri::command]
+fn record_history(app: AppHandle, state: State<Arc<AppState>>, text: String) -> Option<HistoryItem> {
+    let item = state.db().insert(&text).ok()?;
+    let _ = app.emit(EVT_NEW_SELECTION, &item);
+    Some(item)
+}
+
 #[tauri::command]
 fn delete_item(id: i64, state: State<Arc<AppState>>) -> bool {
     state.db().delete(id).is_ok()
@@ -1034,6 +1052,7 @@ pub fn run() {
             get_history,
             copy_item,
             copy_text,
+            record_history,
             delete_item,
             clear_history,
             check_accessibility,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import PasteConfirmPill from "./PasteConfirmPill";
-import { track } from "./analytics";
+import { safeInvoke, track } from "./analytics";
 
 /**
  * Post-permission activation tour. Runs once after the user grants AX +
@@ -112,6 +112,14 @@ export default function ActivationTour({ onDone }: Props) {
       // visible, so we write to the clipboard ourselves to keep the
       // "copied" promise true for step 2's paste.
       try { navigator.clipboard.writeText(text).catch(() => {}); } catch { /* ignore */ }
+      // Bank the clip into history too. The background capture loop skips
+      // capture while this panel is up, so without this the onboarding clips
+      // never land in history and the user hits an empty panel the moment the
+      // tour ends. We record the full sample (not the partial drag selection)
+      // so the banked clip matches the sentence the tour just demonstrated;
+      // record_history is top-row deduped, so the repeated selectionchange
+      // fires collapse to a single entry per sample.
+      safeInvoke("record_history", { text: cur === "select-1" ? SAMPLE_1 : SAMPLE_2 }).catch(() => {});
       setHit(prev => prev[cur] ? prev : { ...prev, [cur]: true });
     }
     document.addEventListener("selectionchange", check);
