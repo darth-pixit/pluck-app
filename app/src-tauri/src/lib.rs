@@ -26,6 +26,11 @@ use tauri::{
 pub(crate) const WIN_HISTORY: &str = "history";
 pub(crate) const WIN_NUDGE: &str = "nudge";
 const EVT_NEW_SELECTION: &str = "new-selection";
+// Emitted by `record_history` for clips the activation tour banks directly.
+// Distinct from `new-selection` on purpose: the frontend updates its list
+// from this but must NOT run the capture/nudge pipeline, since onboarding
+// selections are not real captures.
+const EVT_HISTORY_ADDED: &str = "history-added";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
 const EVT_NUDGE_SHOW: &str = "nudge-show";
 const EVT_PASTE_CONFIRM: &str = "paste-confirm";
@@ -191,6 +196,29 @@ fn copy_item(id: i64, state: State<Arc<AppState>>) -> bool {
 #[tauri::command]
 fn copy_text(text: String) -> bool {
     write_clipboard(&text)
+}
+
+/// Record a clip into history directly from the frontend and broadcast it on
+/// the `history-added` channel so the live panel updates.
+///
+/// The background copy processor skips capture whenever the history panel is
+/// visible (see `start_copy_processor`). During the activation tour the panel
+/// *is* the visible window, so the sample clips the user copies while learning
+/// the gesture would otherwise never make it into history — leaving them with
+/// an empty panel the moment onboarding ends. This command lets the tour bank
+/// those clips itself. Insert is top-row deduped, so calling it repeatedly for
+/// the same text (the tour fires on every `selectionchange`) is a no-op after
+/// the first landing.
+///
+/// We deliberately emit `history-added` rather than `new-selection`: the latter
+/// drives the affirmation / hold-discovery nudge pipeline and bumps the
+/// adoption counters, none of which should run for onboarding samples (it would
+/// inflate `selects_total` and pop nudge pills over the tour).
+#[tauri::command]
+fn record_history(app: AppHandle, state: State<Arc<AppState>>, text: String) -> Option<HistoryItem> {
+    let item = state.db().insert(&text).ok()?;
+    let _ = app.emit(EVT_HISTORY_ADDED, &item);
+    Some(item)
 }
 
 #[tauri::command]
@@ -1034,6 +1062,7 @@ pub fn run() {
             get_history,
             copy_item,
             copy_text,
+            record_history,
             delete_item,
             clear_history,
             check_accessibility,

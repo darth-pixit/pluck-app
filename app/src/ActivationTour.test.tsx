@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ActivationTour, { markActivationSeen, shouldShowActivationTour } from "./ActivationTour";
+import { setInvokeHandler } from "./__tests__/setup";
+
+// Fake a non-collapsed selection living inside `node` (the sample paragraph)
+// so the tour's selectionchange handler treats it as a real highlight. jsdom
+// has no real selection engine, so we stub window.getSelection wholesale.
+function stubSelection(text: string, node: Node) {
+  vi.spyOn(window, "getSelection").mockReturnValue({
+    isCollapsed: false,
+    toString: () => text,
+    getRangeAt: () => ({ commonAncestorContainer: node }),
+  } as unknown as Selection);
+}
+
+// The global setup runs vi.clearAllMocks() (which resets call data but NOT the
+// implementation), so a getSelection spy would otherwise leak into later tests.
+// restoreAllMocks puts the original back.
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("ActivationTour", () => {
   it("renders step 1 (select-1) initially", () => {
@@ -24,6 +41,25 @@ describe("ActivationTour", () => {
   it("renders all 5 progress dots", () => {
     const { container } = render(<ActivationTour onDone={() => {}} />);
     expect(container.querySelectorAll(".tour-dot").length).toBe(5);
+  });
+
+  it("banks the full sample clip into history when the select-1 gesture is hit", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    setInvokeHandler((cmd, args) => { calls.push({ cmd, args }); });
+
+    const { container } = render(<ActivationTour onDone={() => {}} />);
+    const sample = container.querySelector(".activation-sample")!;
+    stubSelection("Pluks just copied this sentence", sample);
+    fireEvent(document, new Event("selectionchange"));
+
+    await waitFor(() => {
+      const rec = calls.find(c => c.cmd === "record_history");
+      expect(rec).toBeTruthy();
+      // We record the canonical sample sentence, not the partial drag text.
+      expect(rec!.args).toEqual({
+        text: "Pluks just copied this sentence the moment you highlighted it.",
+      });
+    });
   });
 
   it("paste step renders a textarea that completes when onPaste fires", () => {

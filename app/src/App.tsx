@@ -406,15 +406,21 @@ export default function App() {
     }
   }, []);
 
+  // Prepend a freshly-banked item to the top of the list, de-duping any
+  // prior occurrence so the same row never appears twice. Shared by the
+  // capture path (`new-selection`) and the tour path (`history-added`).
+  const prependItem = useCallback((item: HistoryItem) => {
+    setItems(prev => {
+      if (prev[0]?.id === item.id) return prev;
+      const filtered = prev.filter(i => i.id !== item.id);
+      return [item, ...filtered].slice(0, 100);
+    });
+  }, []);
+
   // Receive new auto-captured items from the background watcher.
   useEffect(() => {
     const unlisten = listen<HistoryItem>("new-selection", event => {
-      setItems(prev => {
-        if (prev[0]?.id === event.payload.id) return prev;
-        // Filter any prior occurrence so the same row never appears twice.
-        const filtered = prev.filter(i => i.id !== event.payload.id);
-        return [event.payload, ...filtered].slice(0, 100);
-      });
+      prependItem(event.payload);
       // forceShow=true → bypass AFFIRMATION_TIERS decay so the pill fires
       // on every selection. Gated by the `show_nudges` preference inside
       // runNudge; when the user turns nudges off, this branch becomes a
@@ -430,7 +436,18 @@ export default function App() {
       }
     });
     return () => { unlisten.then(fn => fn()); };
-  }, [runNudge]);
+  }, [runNudge, prependItem]);
+
+  // Clips banked by the activation tour arrive on a separate channel so they
+  // only update the list — they must NOT run the capture/nudge pipeline above.
+  // Onboarding selections aren't real captures: counting them would inflate
+  // the adoption counters (selects_total drives affirmation decay and the
+  // hold-discovery gate) and pop nudge pills over the tour, once per
+  // selectionchange. See `record_history` in lib.rs.
+  useEffect(() => {
+    const unlisten = listen<HistoryItem>("history-added", event => prependItem(event.payload));
+    return () => { unlisten.then(fn => fn()); };
+  }, [prependItem]);
 
   // Long-press silent paste — Rust emits `paste-confirm` on a successful
   // fire and `paste-suppressed` for each gate-fail. The pill itself is

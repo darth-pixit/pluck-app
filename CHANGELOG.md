@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Onboarding: sample clips copied during the activation tour now land in
+  history. The background capture loop skips capture while the panel is visible
+  (which it always is during the tour), so these clips were silently dropped and
+  the user hit an empty panel right after onboarding. The tour now records them
+  directly.
 - macOS: ship a single universal2 `.dmg` that runs natively on both Apple
   Silicon and Intel. Apple Silicon users no longer get the "install Rosetta"
   prompt. The release now builds one `universal-apple-darwin` bundle instead of
