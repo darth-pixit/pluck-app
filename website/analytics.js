@@ -375,7 +375,10 @@
 
   function platformFromEl(el) {
     var id = el.id || "";
-    if (id === "dl-mac")   return /Intel/.test(navigator.userAgent) ? "mac_intel" : "mac";
+    // Fall through to the href-based check below: navigator.userAgent reports
+    // "Intel" on every Mac (even Apple Silicon), so it can't distinguish the
+    // two. The resolved DMG href is the reliable signal.
+    if (id === "dl-mac" && !/dmg/i.test(el.href || "")) return "mac";
     if (id === "dl-win")   return "win";
     if (id === "dl-linux") return "linux_appimage";
     if (/dmg/i.test(el.href || "")) return /Intel|x64/.test(el.href) ? "mac_intel" : "mac";

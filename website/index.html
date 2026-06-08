@@ -270,6 +270,28 @@
 <script src="stats.js"></script>
 <script src="analytics.js"></script>
 <script>
+// Returns true only when we can positively identify an Intel Mac. Anything
+// else — Apple Silicon, or undetectable — returns false so we default to the
+// Apple Silicon build. We avoid navigator.userAgent entirely because it always
+// says "Intel" on macOS regardless of the actual CPU.
+function isIntelMac() {
+  try {
+    // WebGL renderer is the most reliable cross-browser signal (Safari +
+    // Chrome): Apple Silicon GPUs report "Apple ..." while Intel Macs report
+    // an Intel/AMD/Radeon GPU.
+    var canvas = document.createElement('canvas');
+    var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl) {
+      var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      var renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '') : '';
+      if (/apple/i.test(renderer)) return false;            // Apple GPU => Apple Silicon
+      if (/intel|amd|radeon|nvidia/i.test(renderer)) return true; // discrete/Intel GPU => Intel Mac
+    }
+  } catch (_) { /* ignore */ }
+
+  return false; // Inconclusive: default to Apple Silicon.
+}
+
 // Auto-resolve download links from the latest GitHub release so the website
 // never goes stale when a new version ships. Targets [data-dl-*] elements so
 // the same selector covers every CTA on the page (nav, hero, and the hidden
@@ -278,11 +300,21 @@ fetch('https://api.github.com/repos/darth-pixit/pluck-app/releases/latest')
   .then(r => r.json())
   .then(release => {
     const assets = release.assets || [];
-    // Detect arm64 vs x64 Mac by user agent; fall back to arm64 (most common)
-    const isIntelMac = /Intel/.test(navigator.userAgent);
-    const macAsset = assets.find(a =>
-      isIntelMac ? a.name.endsWith('_x64.dmg') : a.name.endsWith('_aarch64.dmg')
-    ) || assets.find(a => a.name.includes('.dmg'));
+    // Releases ship a single universal2 DMG that runs natively on both Apple
+    // Silicon and Intel, so prefer it and skip CPU detection entirely.
+    //
+    // The arch-aware fallback below only matters for older releases that still
+    // shipped separate _aarch64/_x64 DMGs. We CANNOT use navigator.userAgent
+    // there: every Mac browser — including Apple Silicon — reports "Intel Mac
+    // OS X" for web-compat reasons, so UA sniffing hands an Intel binary to
+    // everyone and Apple Silicon users get the "install Rosetta" prompt.
+    // isIntelMac() detects the real arch and we default to Apple Silicon (the
+    // overwhelmingly common Mac today) whenever detection is inconclusive.
+    const macAsset =
+      assets.find(a => /universal/i.test(a.name) && a.name.endsWith('.dmg')) ||
+      (isIntelMac() ? assets.find(a => a.name.endsWith('_x64.dmg')) : null) ||
+      assets.find(a => a.name.endsWith('_aarch64.dmg')) ||
+      assets.find(a => a.name.includes('.dmg'));
     const winAsset   = assets.find(a => a.name.endsWith('_x64_en-US.msi') || a.name.endsWith('.msi'));
     const linuxAsset = assets.find(a => a.name.endsWith('_amd64.AppImage'));
     function setHrefs(selector, asset) {

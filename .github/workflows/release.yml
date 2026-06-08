@@ -135,10 +135,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One universal2 binary that runs natively on both Apple Silicon
+          # and Intel — no Rosetta, and no per-arch download to pick wrong.
+          # tauri-action maps the single universal artifact to BOTH the
+          # darwin-aarch64 and darwin-x86_64 updater keys, so existing
+          # installs on either arch still auto-update.
           - platform: "macos-latest"
-            args: "--target aarch64-apple-darwin"
-          - platform: "macos-latest"
-            args: "--target x86_64-apple-darwin"
+            args: "--target universal-apple-darwin"
           - platform: "ubuntu-22.04"
             args: ""
           - platform: "windows-latest"
