@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, engagement] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,38 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT count(DISTINCT distinct_id) AS wau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 7 DAY
+    `),
+
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN ('onboarding_started','onboarding_completed','activation_completed')
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN ('silent_paste_committed','nudge_shown','manual_copy_pressed')
+        AND timestamp >= now() - INTERVAL 2 DAY
+      GROUP BY event
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, engagement };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,7 +197,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau, onboarding, engagement } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -193,6 +222,18 @@ function buildHtml(metrics) {
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
+  const wauVal   = wau[0]?.wau ?? 0;
+
+  const onbStarted   = rowFromData(onboarding, 'onboarding_started');
+  const onbCompleted = rowFromData(onboarding, 'onboarding_completed');
+  const actCompleted = rowFromData(onboarding, 'activation_completed');
+  const activationRate = onbStarted.today > 0
+    ? ((actCompleted.today / onbStarted.today) * 100).toFixed(0)
+    : null;
+
+  const silentPaste   = rowFromData(engagement, 'silent_paste_committed');
+  const nudgeShown    = rowFromData(engagement, 'nudge_shown');
+  const manualCopy    = rowFromData(engagement, 'manual_copy_pressed');
 
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
@@ -296,15 +337,26 @@ function buildHtml(metrics) {
     <div style="font-size:13px;color:#4b5563;margin-top:6px;">${date} &nbsp;·&nbsp; Asia/Kolkata</div>
   </div>
 
-  <!-- DAU hero -->
-  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
-    <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
-    <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
-    ${dauDelta.pct !== null
-      ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
-           ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
-         </div>`
-      : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+  <!-- DAU / WAU hero -->
+  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="text-align:center;width:50%;padding:0 12px 0 0;border-right:1px solid #1c2e22;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
+          <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
+          ${dauDelta.pct !== null
+            ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
+                 ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)})
+               </div>`
+            : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+        </td>
+        <td style="text-align:center;width:50%;padding:0 0 0 12px;">
+          <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Weekly Active Users</div>
+          <div style="font-size:48px;font-weight:800;color:#a78bfa;letter-spacing:-2px;">${num(wauVal)}</div>
+          <div style="font-size:13px;color:#6b7280;margin-top:4px;">rolling 7 days</div>
+        </td>
+      </tr>
+    </table>
   </div>
 
   <!-- ── Traffic ── -->
@@ -338,6 +390,30 @@ function buildHtml(metrics) {
     </tbody>
   </table>
 
+  <!-- ── Activation ── -->
+  ${sectionHeader('🎯 Activation')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Funnel Step</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Onboarding started', onbStarted.today, onbStarted.yesterday)}
+      ${tableRow('Onboarding completed', onbCompleted.today, onbCompleted.yesterday)}
+      ${tableRow('Activation completed', actCompleted.today, actCompleted.yesterday)}
+    </tbody>
+  </table>
+  ${activationRate !== null ? `
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:8px;">
+    <span style="font-size:13px;color:#9ca3af;">Activation rate today:&nbsp;</span>
+    <span style="font-size:14px;font-weight:700;color:${parseInt(activationRate) >= 50 ? '#10b981' : '#f59e0b'};">${activationRate}%</span>
+    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(actCompleted.today)} of ${num(onbStarted.today)} activated)</span>
+  </div>` : ''}
+
   <!-- ── Usage ── -->
   ${sectionHeader('⚡ Usage')}
   <table width="100%" cellpadding="0" cellspacing="0">
@@ -347,6 +423,15 @@ function buildHtml(metrics) {
       ${card('Errors', totalErrors, delta(totalErrors, totalErrorsYest), true)}
     </tr>
   </table>
+  <div style="margin-top:8px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+      <tbody>
+        ${tableRow('Silent paste committed', silentPaste.today, silentPaste.yesterday)}
+        ${tableRow('Nudges shown', nudgeShown.today, nudgeShown.yesterday)}
+        ${tableRow('Manual copy (double-confirmed)', manualCopy.today, manualCopy.yesterday, true)}
+      </tbody>
+    </table>
+  </div>
 
   <!-- Smart paste breakdown -->
   ${smartPaste.length > 0 ? `
@@ -365,7 +450,7 @@ function buildHtml(metrics) {
 
   <!-- Capture fail rate -->
   ${(selections.today + capFails.today) > 0 ? `
-  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;display:flex;align-items:center;">
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;">
     <span style="font-size:13px;color:#9ca3af;">Capture success rate today:&nbsp;</span>
     <span style="font-size:14px;font-weight:700;color:${((selections.today / (selections.today + capFails.today)) * 100) >= 95 ? '#10b981' : '#f59e0b'};">
       ${((selections.today / (selections.today + capFails.today)) * 100).toFixed(1)}%
