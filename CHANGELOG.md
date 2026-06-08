@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-06-08
+
 ### Changed
 - macOS: the `.dmg` now opens to a proper install window — Pluks.app sits next to
   an Applications folder shortcut with a "DRAG PLUKS TO APPLICATIONS" arrow, so
