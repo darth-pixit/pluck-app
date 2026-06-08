@@ -43,7 +43,33 @@ function fakeGpu(renderer: string) {
   };
 }
 
+const UNIVERSAL_RELEASE = {
+  tag_name: "v0.5.0",
+  assets: [
+    {
+      name: "Pluks_0.5.0_universal.dmg",
+      browser_download_url: "https://example.com/Pluks_0.5.0_universal.dmg",
+    },
+  ],
+};
+
 test.describe("Mac download architecture", () => {
+  test("universal DMG is served to everyone, regardless of GPU", async ({ page }) => {
+    await page.route("**/api.github.com/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(UNIVERSAL_RELEASE),
+      }),
+    );
+    // Even when the GPU looks like an Intel Mac, the universal build wins.
+    await page.addInitScript(fakeGpu, "Intel Iris Pro");
+    await page.goto("/");
+    await expect
+      .poll(() => page.locator("#dl-mac").getAttribute("href"))
+      .toContain("_universal.dmg");
+  });
+
   test("Apple Silicon GPU gets the aarch64 DMG", async ({ page }) => {
     await routeRelease(page);
     await page.addInitScript(fakeGpu, "Apple M2");

@@ -5,6 +5,19 @@ All notable changes to Pluks are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- macOS: ship a single universal2 `.dmg` that runs natively on both Apple
+  Silicon and Intel. Apple Silicon users no longer get the "install Rosetta"
+  prompt. The release now builds one `universal-apple-darwin` bundle instead of
+  separate per-arch DMGs; the updater maps it to both darwin keys so existing
+  installs auto-update.
+- Website: the download button handed every Mac visitor the Intel DMG because
+  `navigator.userAgent` reports "Intel" on all Macs. It now serves the universal
+  build (and, for older releases, detects the real arch and defaults to Apple
+  Silicon).
+
 ## [v0.4.5] - 2026-05-16
 
 ### Added

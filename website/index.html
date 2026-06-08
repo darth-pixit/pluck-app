@@ -300,14 +300,18 @@ fetch('https://api.github.com/repos/darth-pixit/pluck-app/releases/latest')
   .then(r => r.json())
   .then(release => {
     const assets = release.assets || [];
-    // Pick the Mac build that matches the visitor's CPU. We CANNOT use
-    // navigator.userAgent for this: every Mac browser — including Apple
-    // Silicon — reports "Intel Mac OS X" in the UA string for web-compat
-    // reasons, so UA sniffing hands an Intel binary to everyone and Apple
-    // Silicon users get the "install Rosetta" prompt. Detect the real arch
-    // instead, and default to Apple Silicon (the overwhelmingly common Mac
-    // today) whenever detection is inconclusive.
+    // Releases ship a single universal2 DMG that runs natively on both Apple
+    // Silicon and Intel, so prefer it and skip CPU detection entirely.
+    //
+    // The arch-aware fallback below only matters for older releases that still
+    // shipped separate _aarch64/_x64 DMGs. We CANNOT use navigator.userAgent
+    // there: every Mac browser — including Apple Silicon — reports "Intel Mac
+    // OS X" for web-compat reasons, so UA sniffing hands an Intel binary to
+    // everyone and Apple Silicon users get the "install Rosetta" prompt.
+    // isIntelMac() detects the real arch and we default to Apple Silicon (the
+    // overwhelmingly common Mac today) whenever detection is inconclusive.
     const macAsset =
+      assets.find(a => /universal/i.test(a.name) && a.name.endsWith('.dmg')) ||
       (isIntelMac() ? assets.find(a => a.name.endsWith('_x64.dmg')) : null) ||
       assets.find(a => a.name.endsWith('_aarch64.dmg')) ||
       assets.find(a => a.name.includes('.dmg'));

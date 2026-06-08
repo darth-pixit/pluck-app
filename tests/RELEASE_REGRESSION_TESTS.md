@@ -593,6 +593,9 @@ correct **badge** + the listed **action buttons** appear → click each action
 ### A14.1 macOS Universal `.dmg` install [MUST PASS] [macOS]
 - **Steps:** Drag to Applications → first launch → open from Spotlight.
 - **Expect:** App opens; Gatekeeper accepts the signed/notarized bundle.
+- **Apple Silicon:** Single `_universal.dmg` asset on the release; first launch
+  shows **no Rosetta prompt**. Confirm native arch in Activity Monitor (Kind =
+  "Apple", not "Intel").
 
 ### A14.2 Windows `.msi` install [MUST PASS] [Windows]
 - **Expect:** Installer completes; Start menu entry exists; SmartScreen allows.
