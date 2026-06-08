@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- macOS: the `.dmg` now opens to a proper install window — Pluks.app sits next to
+  an Applications folder shortcut with a "DRAG PLUKS TO APPLICATIONS" arrow, so
+  users drag-install into `/Applications` instead of running the app from the disk
+  image or Desktop. Installing into `/Applications` avoids Gatekeeper App
+  Translocation, which is the usual reason the Input Monitoring / Accessibility
+  panes show an empty list and force users to manually locate and add the app.
+
 ### Fixed
 - Onboarding: sample clips copied during the activation tour now land in
   history. The background capture loop skips capture while the panel is visible
