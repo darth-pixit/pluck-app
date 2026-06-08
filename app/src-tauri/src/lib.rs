@@ -26,6 +26,11 @@ use tauri::{
 pub(crate) const WIN_HISTORY: &str = "history";
 pub(crate) const WIN_NUDGE: &str = "nudge";
 const EVT_NEW_SELECTION: &str = "new-selection";
+// Emitted by `record_history` for clips the activation tour banks directly.
+// Distinct from `new-selection` on purpose: the frontend updates its list
+// from this but must NOT run the capture/nudge pipeline, since onboarding
+// selections are not real captures.
+const EVT_HISTORY_ADDED: &str = "history-added";
 const EVT_KEYBOARD_OPEN: &str = "keyboard-open";
 const EVT_NUDGE_SHOW: &str = "nudge-show";
 const EVT_PASTE_CONFIRM: &str = "paste-confirm";
@@ -193,8 +198,8 @@ fn copy_text(text: String) -> bool {
     write_clipboard(&text)
 }
 
-/// Record a clip into history directly from the frontend and broadcast it as a
-/// new selection so the live panel updates.
+/// Record a clip into history directly from the frontend and broadcast it on
+/// the `history-added` channel so the live panel updates.
 ///
 /// The background copy processor skips capture whenever the history panel is
 /// visible (see `start_copy_processor`). During the activation tour the panel
@@ -204,10 +209,15 @@ fn copy_text(text: String) -> bool {
 /// those clips itself. Insert is top-row deduped, so calling it repeatedly for
 /// the same text (the tour fires on every `selectionchange`) is a no-op after
 /// the first landing.
+///
+/// We deliberately emit `history-added` rather than `new-selection`: the latter
+/// drives the affirmation / hold-discovery nudge pipeline and bumps the
+/// adoption counters, none of which should run for onboarding samples (it would
+/// inflate `selects_total` and pop nudge pills over the tour).
 #[tauri::command]
 fn record_history(app: AppHandle, state: State<Arc<AppState>>, text: String) -> Option<HistoryItem> {
     let item = state.db().insert(&text).ok()?;
-    let _ = app.emit(EVT_NEW_SELECTION, &item);
+    let _ = app.emit(EVT_HISTORY_ADDED, &item);
     Some(item)
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ActivationTour, { markActivationSeen, shouldShowActivationTour } from "./ActivationTour";
 import { setInvokeHandler } from "./__tests__/setup";
@@ -13,6 +13,11 @@ function stubSelection(text: string, node: Node) {
     getRangeAt: () => ({ commonAncestorContainer: node }),
   } as unknown as Selection);
 }
+
+// The global setup runs vi.clearAllMocks() (which resets call data but NOT the
+// implementation), so a getSelection spy would otherwise leak into later tests.
+// restoreAllMocks puts the original back.
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("ActivationTour", () => {
   it("renders step 1 (select-1) initially", () => {

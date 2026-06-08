@@ -121,6 +121,38 @@ describe("App routing", () => {
     });
   });
 
+  it("'history-added' clips appear in the list without firing a nudge", async () => {
+    localStorage.clear();
+    localStorage.setItem("pluks.onboarding.v1.seen", "1");
+    localStorage.setItem("pluks.activation.v1.seen", "1");
+    const cmds: string[] = [];
+    setInvokeHandler((cmd: string) => {
+      cmds.push(cmd);
+      return permissionHandler({ ax: true, im: true, history: [] })(cmd);
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search history/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      emitTauriEvent("history-added", {
+        id: 7,
+        content: "banked during onboarding",
+        copied_at: new Date().toISOString(),
+        char_count: 24,
+      });
+    });
+
+    // The clip lands in the list…
+    await waitFor(() => {
+      expect(screen.getByText("banked during onboarding")).toBeInTheDocument();
+    });
+    // …but the capture/nudge pipeline never runs for it.
+    expect(cmds).not.toContain("show_nudge");
+    expect(localStorage.getItem("pluks.nudges.selects_total")).toBeNull();
+  });
+
   it("titlebar shows count badge as N / 100", async () => {
     localStorage.clear();
     localStorage.setItem("pluks.onboarding.v1.seen", "1");
