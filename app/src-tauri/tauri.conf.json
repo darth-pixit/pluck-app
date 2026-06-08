@@ -73,7 +73,13 @@
     "macOS": {
       "infoPlist": "macos/Info.plist",
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "Developer ID Application: Parth Dixit (7RC3Q3BU3V)"
+      "signingIdentity": "Developer ID Application: Parth Dixit (7RC3Q3BU3V)",
+      "dmg": {
+        "background": "macos/dmg-background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 }
+      }
     }
   }
 }
