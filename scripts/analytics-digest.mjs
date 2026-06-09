@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wau] = await Promise.all([
 
     hogql(`
       SELECT
@@ -144,9 +144,16 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT count(DISTINCT distinct_id) AS wau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 7 DAY
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,7 +175,7 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wau } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
@@ -193,6 +200,7 @@ function buildHtml(metrics) {
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
+  const wauTotal = wau[0]?.wau ?? 0;
 
   const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
@@ -305,6 +313,7 @@ function buildHtml(metrics) {
            ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
          </div>`
       : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+    ${wauTotal > 0 ? `<div style="font-size:12px;color:#4b5563;margin-top:10px;padding-top:10px;border-top:1px solid #1c2e22;">WAU (7-day unique users) &nbsp;<span style="color:#9ca3af;font-weight:600;">${num(wauTotal)}</span></div>` : ''}
   </div>
 
   <!-- ── Traffic ── -->
