@@ -322,6 +322,14 @@ fn show_in_nudge_window(
     if let Err(e) = win.show() {
         eprintln!("[pluks] {}: show() failed: {:?}", log_tag, e);
     }
+    // CRITICAL: Pluks is an LSUIElement/Accessory app, so it is almost never
+    // the active app when a nudge fires (the user is typing in some other
+    // app). `win.show()` maps to `orderFront:`, which AppKit ignores for an
+    // inactive app — so the nudge window never actually came to the front
+    // and never composited. orderFrontRegardless brings it up regardless of
+    // active state. make_key=false: the pill is click-through and must never
+    // steal keystrokes from the field the user is typing in.
+    order_front_regardless(&win, false);
     // Broadcast — App.tsx in the history window may need to listen too
     // (paste-confirm), and listeners in the nudge webview itself also
     // receive broadcasts.
@@ -546,7 +554,7 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
 }
 
 #[cfg(target_os = "macos")]
-fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
+fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>, make_key: bool) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -556,11 +564,20 @@ fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
 
     // For a NonactivatingPanel we deliberately do NOT call
     // activateIgnoringOtherApps — that would yank the user out of the
-    // foreground app's full-screen Space. orderFrontRegardless +
-    // makeKeyAndOrderFront brings the panel up in place.
+    // foreground app's full-screen Space. orderFrontRegardless brings the
+    // panel up *even though Pluks is an LSUIElement/Accessory app that is
+    // never the active app* — plain `orderFront:` (what window.show() maps
+    // to) is a no-op for an inactive app, which is exactly why the nudge
+    // overlay never composited.
+    //
+    // `make_key` controls makeKeyAndOrderFront: the history panel needs it
+    // to receive keystrokes; the click-through ambient nudge must NOT take
+    // it, or it would steal keys from the field the user is typing in.
     unsafe {
         let _: () = msg_send![ns, orderFrontRegardless];
-        let _: () = msg_send![ns, makeKeyAndOrderFront: std::ptr::null_mut::<AnyObject>()];
+        if make_key {
+            let _: () = msg_send![ns, makeKeyAndOrderFront: std::ptr::null_mut::<AnyObject>()];
+        }
     }
 }
 
@@ -586,14 +603,18 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, _needs_key: b
     let _ = window.set_skip_taskbar(true);
 }
 #[cfg(not(target_os = "macos"))]
-fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>) {
-    let _ = window.set_focus();
+fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>, make_key: bool) {
+    // The click-through nudge overlay passes make_key=false and must never
+    // grab focus; only the history panel asks for it.
+    if make_key {
+        let _ = window.set_focus();
+    }
 }
 
 fn show_history_window<R: Runtime>(window: &WebviewWindow<R>, keyboard: bool) {
     let _ = window.center();
     let _ = window.show();
-    order_front_regardless(window);
+    order_front_regardless(window, true);
     let _ = window.set_focus();
     if keyboard {
         let _ = window.emit(EVT_KEYBOARD_OPEN, ());
