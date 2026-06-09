@@ -669,6 +669,78 @@ kbd {
   text-align: right;
 }
 
+/* Alternating showcase layout (mockup leads on the left) */
+.history-content.reverse { flex-direction: row-reverse; }
+
+/* ── Long-press paste demo ───────────────────────────────────────────── */
+.press-demo {
+  position: relative;
+  width: 320px;
+  min-height: 200px;
+  background: rgba(20,14,10,.95);
+  border: 1px solid rgba(252,76,2,.25);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(252,76,2,.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.press-cursor {
+  position: relative;
+  width: 16px;
+  height: 20px;
+}
+
+.press-cursor svg { width: 16px; height: 20px; display: block; }
+
+/* Expanding ring conveys the "hold still" beat */
+.press-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  transform: translate(-50%, -50%);
+  animation: press-pulse 2.4s ease-out infinite;
+}
+
+@keyframes press-pulse {
+  0%        { width: 14px; height: 14px; opacity: .9; }
+  60%       { width: 54px; height: 54px; opacity: 0; }
+  100%      { width: 54px; height: 54px; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .press-ring { animation: none; opacity: .6; }
+}
+
+.press-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(252,76,2,.12);
+  border: 1px solid rgba(252,76,2,.35);
+  border-radius: 30px;
+  padding: 7px 14px;
+  color: var(--text);
+  font-size: 12px;
+  max-width: 84%;
+}
+
+.press-pill-icon { color: var(--accent-2); }
+
+.press-caption {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+}
+
 /* ── Features ────────────────────────────────────────────────────────── */
 .features {
   padding: 80px 40px;
@@ -701,6 +773,23 @@ kbd {
 .feature-icon { font-size: 28px; }
 .feature-card h3 { font-size: 16px; font-weight: 700; }
 .feature-card p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+.feature-card p code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--accent-3);
+}
+
+/* Smaller pill that sits inline next to a heading */
+.pill-inline {
+  font-size: 9px;
+  padding: 2px 7px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
 
 /* ── Download ────────────────────────────────────────────────────────── */
 .download {
@@ -820,9 +909,11 @@ kbd {
 @media (max-width: 680px) {
   .nav { padding: 14px 20px; }
   .hero { padding: 70px 20px 60px; }
-  .history-content { flex-direction: column; }
+  .history-content,
+  .history-content.reverse { flex-direction: column; }
   .history-mockup { width: 100%; }
   .mockup-panel { width: 100%; max-width: 340px; }
+  .press-demo { width: 100%; max-width: 340px; }
   .step-arrow { display: none; }
   .platform-card { max-width: 100%; }
   .features { padding: 60px 20px; }
