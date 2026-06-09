@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Website: documented the current paste model. Added a "Press & hold to paste"
+  showcase (hold still ~350 ms to drop the most recent clip where the cursor is)
+  and a "Format-aware paste" feature card covering smart-paste variants (Markdown
+  links, hex/rgb/hsl colors, pretty/minified JSON, fenced code). The "How it
+  works" paste step now mentions the press-and-hold gesture alongside ⌘V.
+
 ## [v0.5.0] - 2026-06-08
 
 ### Changed

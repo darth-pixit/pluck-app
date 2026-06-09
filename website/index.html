@@ -105,7 +105,42 @@
       <div class="step-num">03</div>
       <div class="step-icon">📋</div>
       <h3>Paste</h3>
-      <p>Just press Ctrl+V (or Cmd+V). Your selection is already there, ready to go.</p>
+      <p>Press Cmd+V (or Ctrl+V) — your selection is already there. Or just press &amp; hold to drop it in, no keys at all.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── LONG-PRESS PASTE ──────────────────────────────────────────────────── -->
+<section class="history-section">
+  <div class="history-content reverse">
+    <div class="history-text">
+      <span class="pill">New</span>
+      <h2>Press &amp; hold to paste.</h2>
+      <p>
+        Hold the mouse still for a beat — about a third of a second — anywhere on
+        screen, and Pluks drops your most recent clip right where your cursor is.
+        A quiet pill flashes to confirm it landed. No <kbd>⌘V</kbd>, no menu.
+      </p>
+      <p>
+        Start dragging instead and nothing fires, so select-to-copy keeps working
+        exactly as before. On by default — toggle it under
+        <strong>Preferences → Gestures</strong>.
+      </p>
+    </div>
+    <div class="history-mockup">
+      <div class="press-demo">
+        <div class="press-cursor" aria-hidden="true">
+          <svg viewBox="0 0 16 20" fill="none" aria-hidden="true">
+            <path d="M1 1l13 8.5-5.5 1.2L11 17l-2.3 1L6 11.7 2 14.5V1z" fill="#fff" stroke="#000" stroke-width="1"/>
+          </svg>
+          <span class="press-ring"></span>
+        </div>
+        <div class="press-pill">
+          <span class="press-pill-icon">✦</span>
+          <span>Pasted “meeting@company.com”</span>
+        </div>
+        <div class="press-caption">hold ~350 ms · no keys</div>
+      </div>
     </div>
   </div>
 </section>
@@ -163,6 +198,11 @@
       <div class="feature-icon">⚡</div>
       <h3>Zero friction</h3>
       <p>No modal. No notification. No permission popup. Select text → it's in your clipboard.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎯</div>
+      <h3>Format-aware paste <span class="pill pill-inline">New</span></h3>
+      <p>Pluks recognizes what you copied — a URL, color, email, JSON blob, or code — and offers it in the shape you need: Markdown links, <code>#hex</code> / <code>rgb()</code> / <code>hsl()</code>, pretty or minified JSON, fenced code. Pick the variant right from the history row.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🪶</div>
