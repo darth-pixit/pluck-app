@@ -65,22 +65,18 @@
 <section class="stats">
   <div class="stats-inner">
     <div class="stat">
-      <div class="stat-num" id="stat-downloads" data-base="12400">12,400</div>
-      <div class="stat-label">downloads</div>
-    </div>
-    <div class="stat">
-      <div class="stat-num" id="stat-hours" data-base="3812">3,812 hrs</div>
-      <div class="stat-label">saved (and counting)</div>
+      <div class="stat-num">&lt; 10 MB</div>
+      <div class="stat-label">app size (not Electron)</div>
     </div>
     <div class="stat">
       <div class="stat-num">0</div>
       <div class="stat-label">keystrokes required</div>
     </div>
+    <div class="stat">
+      <div class="stat-num">100% local</div>
+      <div class="stat-label">nothing leaves your machine</div>
+    </div>
   </div>
-  <p class="stats-quip">
-    That's <strong id="stat-hours-inline">3,812 hours</strong> our users didn't spend mashing <kbd>⌘</kbd>+<kbd>C</kbd> (or <kbd>Ctrl</kbd>+<kbd>C</kbd>).
-    Your fingers called — they're filing for early retirement. ✨
-  </p>
 </section>
 
 <!-- ─── HOW IT WORKS ─────────────────────────────────────────────────────── -->
@@ -162,7 +158,7 @@
     <div class="feature-card">
       <div class="feature-icon">⚡</div>
       <h3>Zero friction</h3>
-      <p>No modal. No notification. No permission popup. Select text → it's in your clipboard.</p>
+      <p>One 10-second setup step. Then never think about it again. Select text → it's in your clipboard. <a href="#faq">Why the setup step? →</a></p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🪶</div>
@@ -373,6 +369,37 @@
   <p class="ext-note"><a href="privacy.html">Read the full privacy policy →</a></p>
 </section>
 
+<!-- ─── FAQ ──────────────────────────────────────────────────────────────── -->
+<section class="faq" id="faq">
+  <h2 class="section-title">FAQ</h2>
+  <details class="faq-item" id="faq-permission">
+    <summary>Why does Pluks ask for the macOS Accessibility permission?</summary>
+    <div class="faq-body">
+      <p>
+        macOS doesn't let apps read "whatever text is currently selected" directly.
+        So Pluks does what you would do: the moment you finish a selection, it presses
+        <kbd>⌘</kbd>+<kbd>C</kbd> for you. Sending that synthetic keystroke is exactly
+        what the Accessibility permission gates, and noticing your selection gesture
+        (the mouse drag or double-click) is what Input Monitoring gates. Granting them
+        is the one-time, ~10-second setup step.
+      </p>
+      <p>Here's everything the code does with that access:</p>
+      <ul>
+        <li>Listens for selection gestures — drags and double-clicks — so it knows when you've selected something.</li>
+        <li>Sends a synthetic <kbd>⌘</kbd>+<kbd>C</kbd> to the app you're in, so that app copies your selection.</li>
+        <li>Checks the focused field first and skips password inputs (secure text fields) entirely.</li>
+      </ul>
+      <p>
+        It never reads your screen, never logs what you type, and the text you copy never
+        leaves your machine. Don't take our word for it — Pluks is open source, and every
+        line that touches these permissions lives in one file you can read:
+        <a href="https://github.com/darth-pixit/pluck-app/blob/main/app/src-tauri/src/selection.rs"
+           target="_blank" rel="noopener">app/src-tauri/src/selection.rs</a>.
+      </p>
+    </div>
+  </details>
+</section>
+
 <!-- ─── DOWNLOAD MODAL ────────────────────────────────────────────────────── -->
 <div class="modal-backdrop" id="dl-modal" aria-hidden="true">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dl-modal-title">
@@ -451,7 +478,6 @@
 </footer>
 
 <script src="demo.js"></script>
-<script src="stats.js"></script>
 <script src="analytics.js"></script>
 <script src="feedback.js"></script>
 <script>

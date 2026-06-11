@@ -26,6 +26,20 @@ test.describe("Page render", () => {
     expect(real).toEqual([]);
   });
 
+  test("permission FAQ is collapsed by default and links to selection.rs", async ({ page }) => {
+    await page.goto("/");
+    const faq = page.locator("#faq-permission");
+    const body = faq.locator(".faq-body");
+    // "Beneath a click": the explanation must not be visible until expanded.
+    await expect(body).toBeHidden();
+    await faq.locator("summary").click();
+    await expect(body).toBeVisible();
+    await expect(body.locator("a[href*='selection.rs']")).toHaveAttribute(
+      "href",
+      /github\.com\/darth-pixit\/pluck-app\/blob\/main\/app\/src-tauri\/src\/selection\.rs/,
+    );
+  });
+
   test("privacy page renders", async ({ page }) => {
     await page.goto("/privacy.html");
     await expect(page.locator("body")).toContainText(/privacy/i);
