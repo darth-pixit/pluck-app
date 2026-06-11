@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  # Manual release from the Actions tab (works in the GitHub mobile web UI):
+  # tap "Run workflow" and either leave the tag blank to release the version
+  # currently in tauri.conf.json, or type an explicit vX.Y.Z. The tag is
+  # created at the chosen ref by the create-release job below, so no local
+  # git is needed.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (blank = v<version> from tauri.conf.json)"
+        required: false
+        type: string
 
 jobs:
   # Create the draft release first, then all build jobs upload to it
@@ -17,29 +28,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Guard against tagging without bumping the source version. tauri-action
+      # Resolve the release tag once for both triggers:
+      #   - push: take it from the pushed ref (refs/tags/vX.Y.Z)
+      #   - workflow_dispatch: use the typed input, or default to
+      #     v<version> from tauri.conf.json so a blank "Run workflow" just
+      #     ships the current source version.
+      # The format check (vX.Y.Z) also sanitizes the user-supplied input
+      # before it's used downstream.
+      - name: Resolve release tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+            if [ -z "$TAG" ]; then
+              VERSION=$(python3 -c "import json; print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])")
+              TAG="v$VERSION"
+            fi
+          else
+            TAG="${REF#refs/tags/}"
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved tag '$TAG' is not a vX.Y.Z tag."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: $TAG"
+
+      # Guard against releasing without bumping the source version. tauri-action
       # builds whatever version is in tauri.conf.json, so a tag like v0.2.13
       # cut from a tree still on 0.2.12 produces a 0.2.12 manifest — clients
       # already on 0.2.12 then never see an update. Fail fast instead.
       - name: Verify tag matches source version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
+          TAG_VERSION="${TAG#v}"
           SRC=$(python3 -c "import json; print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])")
-          if [ "$TAG" != "$SRC" ]; then
-            echo "::error::Tag v$TAG does not match tauri.conf.json version $SRC. Bump the source version before tagging."
+          if [ "$TAG_VERSION" != "$SRC" ]; then
+            echo "::error::Tag $TAG does not match tauri.conf.json version $SRC. Bump the source version before releasing."
             exit 1
           fi
 
       - name: Find or create release
         id: create
         uses: actions/github-script@v7
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         with:
           script: |
             const fs = require('fs');
-            const tag = context.ref.replace('refs/tags/', '');
-            // Tag may have been pushed standalone (workflow creates the draft)
-            // or via GitHub's "Draft a new release" UI (release already exists).
-            // Either path should work — find first, create only if missing.
+            const tag = process.env.TAG;
+            // Tag may have been pushed standalone (workflow creates the draft),
+            // created via GitHub's "Draft a new release" UI (release already
+            // exists), or requested via workflow_dispatch (no git tag yet —
+            // createRelease below creates it at context.sha). Either path
+            // should work — find first, create only if missing.
             try {
               const { data } = await github.rest.repos.getReleaseByTag({
                 owner: context.repo.owner,
@@ -91,6 +138,9 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
+              // For workflow_dispatch there is no git tag yet; GitHub creates
+              // it at this commit. For a pushed tag this is ignored.
+              target_commitish: context.sha,
               name: `Pluks ${tag}`,
               body,
               draft: true,
