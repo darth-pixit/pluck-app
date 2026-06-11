@@ -836,6 +836,118 @@ kbd {
   text-align: right;
 }
 
+/* ── Long-press paste ────────────────────────────────────────────────── */
+/* Mirror the history band but flip the visual to the left for variety. */
+.paste-content { flex-direction: row-reverse; }
+
+.paste-lead {
+  font-size: 16px !important;
+  color: var(--text) !important;
+}
+
+.paste-points {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.paste-points li {
+  font-size: 14px;
+  color: var(--muted);
+  padding-left: 26px;
+  position: relative;
+}
+
+.paste-points li::before {
+  content: "✦";
+  position: absolute;
+  left: 0;
+  color: var(--accent-2);
+}
+
+.paste-demo {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  justify-content: center;
+}
+
+.paste-window {
+  position: relative;
+  width: 320px;
+  background: rgba(20,14,10,.95);
+  border: 1px solid rgba(252,76,2,.25);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(252,76,2,.1);
+  overflow: hidden;
+}
+
+.paste-window-bar {
+  display: flex;
+  gap: 7px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+
+.paste-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.15);
+}
+
+.paste-window-body { padding: 22px 18px 40px; min-height: 110px; }
+
+.paste-line {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.paste-caret {
+  background: rgba(252,76,2,.18);
+  border-radius: 4px;
+  padding: 1px 3px;
+  animation: paste-flash 3s ease-in-out infinite;
+}
+
+@keyframes paste-flash {
+  0%, 60%, 100% { background: rgba(252,76,2,.18); }
+  10%, 40% { background: rgba(252,76,2,.4); }
+}
+
+.caret {
+  color: var(--accent-2);
+  font-weight: 700;
+  animation: caret-blink 1.1s step-end infinite;
+}
+
+@keyframes caret-blink {
+  50% { opacity: 0; }
+}
+
+.paste-pill {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(20,14,10,.95);
+  border: 1px solid rgba(252,76,2,.4);
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 30px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  animation: pill-rise 3s ease-in-out infinite;
+}
+
+@keyframes pill-rise {
+  0%, 100% { opacity: 0; transform: translateY(6px); }
+  15%, 50% { opacity: 1; transform: translateY(0); }
+}
+
 /* ── Features ────────────────────────────────────────────────────────── */
 .features {
   padding: 80px 40px;
