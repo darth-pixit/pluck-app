@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Website: a feedback widget pinned to the bottom-right of every page. Visitors
+  can write a query, bug report, or idea and send it — the form hands off to a
+  pre-filled email to parth.dixit@alumni.iitd.ac.in (also shown as a direct
+  mailto link for anyone who'd rather email straight away). Submissions emit
+  anonymous, content-free analytics (length bucket + whether a reply email was
+  given); the message text itself is never transmitted to PostHog.
+
 ## [v0.5.1] - 2026-06-11
 
 ### Fixed

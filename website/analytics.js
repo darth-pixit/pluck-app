@@ -78,6 +78,8 @@
     demo_interacted:         ["selection_chars_bucket"],
     demo_completed:          ["time_to_complete_ms"],
     privacy_viewed:          ["from_path"],
+    feedback_widget_opened:  [],
+    feedback_submitted:      ["has_email", "message_chars_bucket"],
     error_uncaught_js:       ["error_type", "error_message_hash"]
   };
 
