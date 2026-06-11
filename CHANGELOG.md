@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Clipboard now captures **every** copy, not just the select-to-copy gesture. A
+  background clipboard watcher records anything that reaches the system
+  clipboard — a manual Cmd+C / Ctrl+C, right-click → Copy, a "Copy" button, or a
+  copy from another app — into history, so it shows in the panel and is what
+  long-press pastes. Previously only drag-select / double-click / Cmd+A were
+  recorded; a plain Ctrl+C landed on the OS clipboard but never in Pluks.
+  - **Privacy:** content the source flags as concealed is never read or stored.
+    On macOS that's the `org.nspasteboard.ConcealedType` / `TransientType`
+    pasteboard markers; on Windows it's `ExcludeClipboardContentFromMonitorProcessing`
+    and `CanIncludeInClipboardHistory=0`. This is the standard signal password
+    managers set to stay out of clipboard history. (Linux concealed-type
+    filtering is not implemented yet — tracked as a follow-up.)
+  - The watcher only reads the clipboard (no synthesized input), so it works
+    even before Accessibility / Input Monitoring are granted, and is the first
+    capture path that functions under Wayland.
+  - "Disable Auto-Copy" pauses the watcher too; Pluks's own writes (copying a
+    history item, long-press paste) don't echo back as duplicate entries.
 - Website: a feedback widget pinned to the bottom-right of every page. Visitors
   can write a query, bug report, or idea and send it — the form hands off to a
   pre-filled email to parth.dixit@alumni.iitd.ac.in (also shown as a direct
