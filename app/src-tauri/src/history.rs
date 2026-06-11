@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, Result, Row};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const HISTORY_LIMIT: usize = 100;
+pub const HISTORY_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryItem {
@@ -197,15 +197,15 @@ mod tests {
     }
 
     #[test]
-    fn history_is_capped_at_100() {
+    fn history_is_capped_at_limit() {
         let (mut db, _d) = fresh_db();
-        for i in 0..120 {
+        for i in 0..(HISTORY_LIMIT + 20) {
             db.insert(&format!("item-{:03}", i)).unwrap();
         }
         let all = db.get_all().unwrap();
         assert_eq!(all.len(), HISTORY_LIMIT);
-        // Newest 100 retained — item-119 is on top.
-        assert_eq!(all[0].content, "item-119");
+        // Newest entries retained — the last insert is on top.
+        assert_eq!(all[0].content, format!("item-{:03}", HISTORY_LIMIT + 19));
         // Oldest 20 dropped.
         assert!(all.iter().all(|i| i.content != "item-000"));
         assert!(all.iter().all(|i| i.content != "item-019"));

@@ -67,7 +67,7 @@ test files is the source of truth — this annotation is a navigation aid.
 - **Pre:** No `settings.json`, no `localStorage`, no SQLite db.
 - **Steps:** Launch app for the first time.
 - **Expect:**
-  - 3-step "Select to copy / Your last 100 clips / Privacy first" tour shows.
+  - 3-step "Select to copy / Your last 200 clips / Privacy first" tour shows.
   - Progress dots reflect current step.
   - "Skip" and "Next →" buttons both work.
   - On final step, primary button reads "Get started".
@@ -238,7 +238,7 @@ test files is the source of truth — this annotation is a navigation aid.
 - **Expect:** Panel says "Select any text to start collecting".
 
 ### A3.7 Item count badge reflects history size [SHOULD PASS]
-- **Expect:** Titlebar shows `N / 100`.
+- **Expect:** Titlebar shows `N / 200`.
 
 ### A3.8 Items render newest-first [MUST PASS]
 - **Steps:** Select text A → text B.
@@ -542,9 +542,9 @@ correct **badge** + the listed **action buttons** appear → click each action
 - **Steps:** Capture 3 items → quit → relaunch.
 - **Expect:** All 3 still visible.
 
-### A12.2 100-item cap is enforced [MUST PASS]
-- **Steps:** Capture 110 distinct items.
-- **Expect:** Only newest 100 retained; oldest 10 dropped.
+### A12.2 200-item cap is enforced [MUST PASS]
+- **Steps:** Capture 210 distinct items.
+- **Expect:** Only newest 200 retained; oldest 10 dropped.
 
 ### A12.3 Settings persist across restart [MUST PASS]
 - **Steps:** Toggle opt-out → relaunch.
@@ -678,9 +678,9 @@ correct **badge** + the listed **action buttons** appear → click each action
 - **Steps:** Select the same exact text twice.
 - **Expect:** Only one entry; `ts` updated.
 
-### B3.3 100-item cap [MUST PASS]
-- **Steps:** Capture 110 distinct selections.
-- **Expect:** `history.length === 100`; oldest dropped.
+### B3.3 200-item cap [MUST PASS]
+- **Steps:** Capture 210 distinct selections.
+- **Expect:** `history.length === 200`; oldest dropped.
 
 ## B4. Popup UI
 

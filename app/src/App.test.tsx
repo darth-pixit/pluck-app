@@ -191,7 +191,7 @@ describe("App routing", () => {
     });
   });
 
-  it("titlebar shows count badge as N / 100", async () => {
+  it("titlebar shows count badge as N / 200", async () => {
     localStorage.clear();
     localStorage.setItem("pluks.onboarding.v1.seen", "1");
     localStorage.setItem("pluks.activation.v1.seen", "1");
@@ -204,7 +204,7 @@ describe("App routing", () => {
     setInvokeHandler(permissionHandler({ ax: true, im: true, history: items }));
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText(/3 \/ 100/)).toBeInTheDocument();
+      expect(screen.getByText(/3 \/ 200/)).toBeInTheDocument();
     });
   });
 });

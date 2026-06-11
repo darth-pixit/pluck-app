@@ -24,8 +24,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::history::HistoryItem;
 use crate::selection::{
-    activate_pid, focus_is_secure_field, frontmost_pid, simulate_paste, write_clipboard,
-    MouseEvent,
+    activate_pid, focus_is_secure_field, frontmost_pid, simulate_paste, MouseEvent,
 };
 use crate::settings;
 use crate::AppState;
@@ -217,7 +216,10 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
             let target = frontmost_pid().filter(|&p| p != our_pid);
             state.set_target_pid(target);
 
-            if !write_clipboard(&content) {
+            // Remembered write: long-press puts the most-recent clip back on
+            // the clipboard, and the poller must not re-record that as a fresh
+            // external copy.
+            if !state.write_clipboard_remembered(&content) {
                 eprintln!("[pluks] try_fire: clipboard write failed");
                 let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": "clipboard_failed" }));
                 state.set_target_pid(None);

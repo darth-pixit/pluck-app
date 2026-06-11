@@ -205,14 +205,14 @@ test.describe("Content script", () => {
     expect(history.some((i) => i.text.includes("no clipboard available here"))).toBe(true);
   });
 
-  test("history is capped at 100 entries", async ({ context, baseURL, serviceWorker }) => {
+  test("history is capped at 200 entries", async ({ context, baseURL, serviceWorker }) => {
     const page = await context.newPage();
     await page.goto(baseURL);
-    // Pre-load 100 entries directly via the service worker.
+    // Pre-load 200 entries directly via the service worker.
     await serviceWorker.evaluate(async () => {
-      const items = Array.from({ length: 100 }, (_, i) => ({
+      const items = Array.from({ length: 200 }, (_, i) => ({
         text: `pre-existing-${String(i).padStart(3, "0")}`,
-        ts: Date.now() - (100 - i) * 1000,
+        ts: Date.now() - (200 - i) * 1000,
       }));
       await chrome.storage.local.set({ history: items });
     });
@@ -221,6 +221,6 @@ test.describe("Content script", () => {
       const { history = [] } = await (chrome.storage.local.get("history") as Promise<{ history?: unknown[] }>);
       return history.length;
     });
-    expect(len).toBe(100);
+    expect(len).toBe(200);
   });
 });

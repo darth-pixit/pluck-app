@@ -84,6 +84,10 @@ if (typeof document !== "undefined") {
   document.body.classList.add(IS_MAC ? "platform-mac" : "platform-other");
 }
 
+// Mirrors HISTORY_LIMIT in src-tauri/src/history.rs — the backend enforces the
+// cap; this only keeps the in-memory list from drifting past it between loads.
+const HISTORY_LIMIT = 200;
+
 // 100 ms guard against the shortcut's own Cmd-release that fires right after the
 // global shortcut activates the panel.
 const KEYBOARD_OPEN_DEBOUNCE_MS = 100;
@@ -172,7 +176,7 @@ const TOUR_STEPS: TourStep[] = [
     body: "Highlight any text — anywhere on your Mac. No Cmd+C, no right-click. Pluks grabs it the moment you let go.",
   },
   {
-    title: `Your last 100 clips, ${SHORTCUT_HINT} away`,
+    title: `Your last ${HISTORY_LIMIT} clips, ${SHORTCUT_HINT} away`,
     body: "Hit the shortcut from any app to open your clipboard history. Search, click, paste — anything you copied recently is one tap away.",
   },
   {
@@ -413,7 +417,7 @@ export default function App() {
     setItems(prev => {
       if (prev[0]?.id === item.id) return prev;
       const filtered = prev.filter(i => i.id !== item.id);
-      return [item, ...filtered].slice(0, 100);
+      return [item, ...filtered].slice(0, HISTORY_LIMIT);
     });
   }, []);
 
@@ -679,7 +683,7 @@ export default function App() {
   return (
     <div className="panel">
       <Titlebar>
-        <span className="count" data-tauri-drag-region>{items.length} / 100</span>
+        <span className="count" data-tauri-drag-region>{items.length} / {HISTORY_LIMIT}</span>
         <button
           className="gear-btn"
           title="Preferences"
