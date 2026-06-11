@@ -120,11 +120,49 @@
   <a href="https://github.com/darth-pixit/pluck-app/issues" target="_blank" rel="noopener">github.com/darth-pixit/pluck-app/issues</a>.</p>
 </div>
 
+<!-- ─── FEEDBACK WIDGET ───────────────────────────────────────────────────── -->
+<div class="feedback-widget">
+  <button class="feedback-fab" id="feedback-fab" type="button"
+          aria-expanded="false" aria-controls="feedback-panel">
+    <span class="feedback-fab-icon" aria-hidden="true">✦</span>
+    <span class="feedback-fab-label">Feedback</span>
+  </button>
+  <div class="feedback-panel" id="feedback-panel" role="dialog"
+       aria-labelledby="feedback-title" hidden>
+    <button class="feedback-close" id="feedback-close" type="button" aria-label="Close">×</button>
+    <div class="feedback-icon" aria-hidden="true">✦</div>
+    <h3 id="feedback-title">Got feedback or a bug?</h3>
+    <p class="feedback-sub">Tell us what's working, what's broken, or what you'd love to see. We read every message.</p>
+    <form id="feedback-form" class="feedback-form" novalidate>
+      <label class="feedback-field">
+        <span>Your email <em>(optional, so we can reply)</em></span>
+        <input type="email" id="feedback-email" placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label class="feedback-field">
+        <span>Message</span>
+        <textarea id="feedback-message" rows="4" required
+                  placeholder="What's on your mind?"></textarea>
+      </label>
+      <button type="submit" class="btn-primary feedback-submit">Send feedback</button>
+      <p class="feedback-error" id="feedback-error" hidden></p>
+      <p class="feedback-foot">Prefer email? Write to
+        <a href="mailto:parth.dixit@alumni.iitd.ac.in">parth.dixit@alumni.iitd.ac.in</a>.</p>
+    </form>
+    <div class="feedback-success" id="feedback-success" hidden>
+      <div class="feedback-success-icon" aria-hidden="true">✓</div>
+      <p>Thanks! Your email app should open with the message ready to send. If it
+         didn't, reach us at
+         <a href="mailto:parth.dixit@alumni.iitd.ac.in">parth.dixit@alumni.iitd.ac.in</a>.</p>
+    </div>
+  </div>
+</div>
+
 <footer class="footer">
   <span class="footer-brand">pluks</span>
   <span class="footer-copy">MIT License · Made with ✦ and Rust</span>
   <a href="https://github.com/darth-pixit/pluck-app" target="_blank" rel="noopener" class="footer-link">GitHub</a>
 </footer>
 <script src="analytics.js"></script>
+<script src="feedback.js"></script>
 </body>
 </html>

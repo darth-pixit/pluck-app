@@ -456,6 +456,173 @@ a:hover { text-decoration: underline; }
   margin: 0;
 }
 
+/* ── Feedback widget ─────────────────────────────────────────────────── */
+.feedback-widget {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.feedback-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 20px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(252,76,2,.32), 0 2px 8px rgba(0,0,0,.3);
+  transition: background .15s, transform .1s, box-shadow .15s;
+}
+.feedback-fab:hover {
+  background: var(--accent-2);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(252,76,2,.4), 0 2px 8px rgba(0,0,0,.3);
+}
+.feedback-fab-icon { font-size: 14px; line-height: 1; }
+
+.feedback-panel {
+  width: min(360px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid rgba(252,76,2,.25);
+  border-radius: var(--radius);
+  padding: 24px 22px 22px;
+  position: relative;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(252,76,2,.08);
+  opacity: 0;
+  transform: translateY(8px) scale(.98);
+  transform-origin: bottom right;
+  transition: opacity .18s, transform .18s;
+  pointer-events: none;
+}
+.feedback-panel.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.feedback-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 4px 10px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+}
+.feedback-close:hover { color: var(--text); background: rgba(255,255,255,.06); }
+
+.feedback-icon { font-size: 24px; color: var(--accent-2); margin-bottom: 6px; }
+
+.feedback-panel h3 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  margin-bottom: 6px;
+}
+
+.feedback-sub {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.feedback-form { display: flex; flex-direction: column; gap: 12px; }
+/* The `display` rule above outranks the UA `[hidden] { display:none }`, so the
+   toggle between form and success state needs an explicit hidden override. */
+.feedback-form[hidden] { display: none; }
+
+.feedback-field { display: flex; flex-direction: column; gap: 6px; }
+
+.feedback-field span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.feedback-field span em {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  opacity: .8;
+}
+
+.feedback-field input,
+.feedback-field textarea {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 13px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+  transition: border-color .15s, background .15s;
+}
+.feedback-field textarea { resize: vertical; min-height: 84px; }
+.feedback-field input:focus,
+.feedback-field textarea:focus {
+  outline: none;
+  border-color: rgba(252,76,2,.55);
+  background: rgba(255,255,255,.06);
+}
+
+.feedback-submit {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: 2px;
+  padding: 12px 24px;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+.feedback-error { color: #ff7a59; font-size: 12.5px; margin: 0; }
+
+.feedback-foot {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 2px 0 0;
+}
+
+.feedback-success { text-align: center; padding: 6px 0; }
+.feedback-success-icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: rgba(252,76,2,.15);
+  color: var(--accent-2);
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feedback-success p {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
 /* ── Section shared ──────────────────────────────────────────────────── */
 .section-title {
   font-size: clamp(26px, 4vw, 40px);
@@ -828,6 +995,10 @@ kbd {
   .features { padding: 60px 20px; }
   .footer { padding: 24px 20px; }
   .footer-link { margin-left: 0; width: 100%; }
+  .feedback-widget { right: 16px; bottom: 16px; }
+  .feedback-fab .feedback-fab-label { display: none; }
+  .feedback-fab { padding: 14px; }
+  .feedback-fab-icon { font-size: 18px; }
 }
 
 /* ── Privacy & telemetry section ─────────────────────────────────────── */
