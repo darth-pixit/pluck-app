@@ -1,6 +1,6 @@
-# Pluks — Select to Copy
+# Pluks — Select to Copy, Long-press to Paste
 
-**Select any text. It's already copied.** No Ctrl+C. No right-click. Just highlight, and Pluks does the rest.
+**Select any text. It's already copied. Press and hold anywhere — it's pasted.** No Ctrl+C, no Ctrl+V, no right-click. Two gestures, one matched pair: highlight to copy, long-press to paste it back into whatever you're working in.
 
 Free, tiny, and open-source. Available as a browser extension and a native desktop app for macOS, Windows, and Linux.
 
@@ -19,10 +19,10 @@ Website: [pluks.app](https://pluks.app) · Current desktop release: **v0.5.1** (
 
 ## Features
 
-- **Auto-copy on selection** — highlight text anywhere and it's on your clipboard.
-- **Silent paste-back** — paste from history without stealing focus from the app you're in; a brief confirmation pill tells you it landed. Select-to-replace works via a Cmd+V watch window.
+- **Select to copy** — highlight text anywhere and it's on your clipboard before you even lift your finger.
+- **Long-press to paste** *(desktop)* — the other half of the gesture pair. Press and hold still for ~350 ms anywhere on screen and Pluks silently pastes your most recent clip into the app you're already in — no Cmd+V, no focus stolen, just a whisper-quiet confirmation pill near your cursor. Movement always wins, so a normal click-drag to select never triggers a paste. (⌃⇧V opens the full history overlay for everything else.)
 - **Smart paste** — Pluks recognizes URLs, emails, hex colors, and JSON in your history and offers handy paste-format variants.
-- **Adaptive nudges** *(desktop)* — gentle "✦ Copied" affirmations while the habit forms, plus a corrective hint when you reach for Ctrl+C out of muscle memory. Tapers off as you adopt the gesture, and has a kill-switch.
+- **Adaptive nudges** *(desktop)* — gentle "✦ Copied" affirmations while each habit forms, a corrective hint when you reach for Ctrl+C out of muscle memory, and a one-time discovery nudge that teaches the long-press paste gesture once you've copied enough to be ready for it. Both sides taper off as you adopt them, and there's a kill-switch.
 - **Searchable history** — last 100 clips, kept locally.
 - **Local-first** — clipboard data never leaves your device.
 - **Auto-updating desktop app** — signed releases install in place; macOS ships a single universal2 build for Apple Silicon and Intel.
