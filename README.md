@@ -19,10 +19,10 @@ Website: [pluks.app](https://pluks.app) · Current desktop release: **v0.5.1** (
 
 ## Features
 
-- **Select to copy** — highlight text anywhere and it's on your clipboard before you even lift your finger.
-- **Long-press to paste** *(desktop)* — the other half of the gesture pair. Press and hold still for ~350 ms anywhere on screen and Pluks silently pastes your most recent clip into the app you're already in — no Cmd+V, no focus stolen, just a whisper-quiet confirmation pill near your cursor. Movement always wins, so a normal click-drag to select never triggers a paste. (⌃⇧V opens the full history overlay for everything else.)
+- **Select to copy** — highlight text anywhere; it's on your clipboard before you lift your finger.
+- **Long-press to paste** *(desktop)* — press and hold anywhere; your last clip lands where you're typing. No Cmd+V, no stolen focus. (⌃⇧V opens the full history.)
 - **Smart paste** — Pluks recognizes URLs, emails, hex colors, and JSON in your history and offers handy paste-format variants.
-- **Adaptive nudges** *(desktop)* — gentle "✦ Copied" affirmations while each habit forms, a corrective hint when you reach for Ctrl+C out of muscle memory, and a one-time discovery nudge that teaches the long-press paste gesture once you've copied enough to be ready for it. Both sides taper off as you adopt them, and there's a kill-switch.
+- **Adaptive nudges** *(desktop)* — gentle "✦ Copied" affirmations while the habits form, plus a one-time hint that teaches the long-press gesture. Tapers off as you adopt them; has a kill-switch.
 - **Searchable history** — last 100 clips, kept locally.
 - **Local-first** — clipboard data never leaves your device.
 - **Auto-updating desktop app** — signed releases install in place; macOS ships a single universal2 build for Apple Silicon and Intel.
