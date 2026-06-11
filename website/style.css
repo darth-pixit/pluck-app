@@ -869,6 +869,138 @@ kbd {
 .feature-card h3 { font-size: 16px; font-weight: 700; }
 .feature-card p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
 
+/* ── Comparison ──────────────────────────────────────────────────────── */
+.compare {
+  padding: 80px 40px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.compare-sub {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+  text-align: center;
+  max-width: 520px;
+  margin: -32px auto 40px;
+}
+
+.compare-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  /* Soft edge fade hints that the table scrolls horizontally on small screens. */
+  scrollbar-color: rgba(252,76,2,.4) transparent;
+}
+.compare-table-wrap:focus-visible {
+  outline: 2px solid rgba(252,76,2,.55);
+  outline-offset: 2px;
+}
+
+.compare-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 13px 14px;
+  text-align: center;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  vertical-align: middle;
+}
+.compare-table tbody tr:last-child th,
+.compare-table tbody tr:last-child td { border-bottom: none; }
+.compare-table tbody tr:hover td,
+.compare-table tbody tr:hover th[scope="row"] { background: rgba(255,255,255,.025); }
+
+/* Factor column — sticky so it stays readable while scrolling sideways */
+.compare-table th[scope="row"],
+.compare-table th.compare-factor {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  min-width: 190px;
+  max-width: 230px;
+}
+
+.compare-table thead th {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  padding-top: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.compare-table thead th a { color: var(--text); }
+.compare-table thead th a:hover { color: var(--accent-3); }
+
+.compare-name { color: var(--accent-2); letter-spacing: .06em; }
+
+.compare-tag {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Pluks column highlight */
+.compare-table .col-pluks {
+  background: rgba(252,76,2,.08);
+  border-left: 1px solid rgba(252,76,2,.25);
+  border-right: 1px solid rgba(252,76,2,.25);
+}
+.compare-table tbody tr:hover .col-pluks { background: rgba(252,76,2,.12); }
+
+/* Cell marks */
+.c-yes  { color: var(--accent-2); font-weight: 800; font-size: 15px; }
+.c-no   { color: rgba(255,255,255,.28); font-weight: 700; font-size: 14px; }
+.c-part { color: var(--accent-3); font-weight: 800; font-size: 15px; }
+.c-text { color: var(--text); font-weight: 500; }
+
+.c-note {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.c-note sup, .c-text sup { color: var(--accent-3); }
+
+.compare-footnotes {
+  margin: 20px auto 0;
+  max-width: 720px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.compare-disclaimer {
+  margin-top: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 680px) {
+  .compare { padding: 60px 16px; }
+  .compare-table th[scope="row"],
+  .compare-table th.compare-factor { min-width: 150px; max-width: 170px; }
+}
+
 /* ── Download ────────────────────────────────────────────────────────── */
 .download {
   padding: 80px 40px;
