@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Clipboard history now keeps your last 200 clips, up from 100, in both the
+  desktop app and the browser extension.
+
 ### Added
 - Website: a feedback widget pinned to the bottom-right of every page. Visitors
   can write a query, bug report, or idea and send it — the form hands off to a

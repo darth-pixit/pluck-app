@@ -1,9 +1,9 @@
 // Pluks background service worker
-// Stores selection history in chrome.storage.local (max 100 entries) and
+// Stores selection history in chrome.storage.local (max 200 entries) and
 // emits anonymous lifecycle telemetry via Pluks analytics.
 importScripts("config.js", "analytics.js");
 
-const MAX_HISTORY = 100;
+const MAX_HISTORY = 200;
 
 // One-time on install/update.
 chrome.runtime.onInstalled.addListener(async (details) => {
