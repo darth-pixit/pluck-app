@@ -20,7 +20,7 @@ Website: [pluks.app](https://pluks.app)
 ## Features
 
 - **Auto-copy on selection** — highlight text anywhere and it's on your clipboard.
-- **Searchable history** — last 100 clips, kept locally.
+- **Searchable history** — last 200 clips, kept locally.
 - **Local-first** — clipboard data never leaves your device.
 - **Anonymous, opt-out telemetry** — usage stats help us improve; turn it off in the popup or preferences.
 - **Cross-platform** — macOS, Windows, Linux, plus Chrome- and Firefox-based browsers.
