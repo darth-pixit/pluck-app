@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-06-11
+
+### Fixed
+- macOS: nudges never appeared — not the copy/paste affirmations, the corrective
+  hint, the long-press discovery nudge, nor the tray "Test Nudge" diagnostic.
+  Pluks runs as a menu-bar accessory app (`LSUIElement` + `Accessory` activation
+  policy), so it is almost never the *active* application when a nudge fires.
+  AppKit's `orderFront:` — which the window show path relied on — is a no-op for
+  an inactive app, so the transparent nudge overlay never came to the front and
+  never composited. The nudge window now calls `orderFrontRegardless` after
+  showing, without taking key focus, so the pill appears without stealing
+  keystrokes from whatever app you're typing in.
+
 ## [v0.5.0] - 2026-06-08
 
 ### Changed

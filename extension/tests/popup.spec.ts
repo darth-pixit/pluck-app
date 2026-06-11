@@ -77,10 +77,22 @@ test.describe("Popup", () => {
     expect(remaining).toBe(0);
   });
 
-  test("opt-out toggle persists across popup re-opens", async ({ context, extensionId }) => {
+  test("opt-out toggle persists across popup re-opens", async ({ context, extensionId, serviceWorker }) => {
     const page1 = await context.newPage();
     await page1.goto(`chrome-extension://${extensionId}/popup.html`);
     await page1.check("#optOut");
+    // check() resolves as soon as the box is checked, but the change handler
+    // persists the flag to chrome.storage.local asynchronously. Wait for that
+    // write to land before closing the page — otherwise page2 races the write
+    // and reads back the pre-toggle value (flaky "unchecked").
+    await expect
+      .poll(() =>
+        serviceWorker.evaluate(async () => {
+          const { pluks_opt_out } = await chrome.storage.local.get("pluks_opt_out");
+          return pluks_opt_out;
+        }),
+      )
+      .toBe(true);
     await page1.close();
     const page2 = await context.newPage();
     await page2.goto(`chrome-extension://${extensionId}/popup.html`);
