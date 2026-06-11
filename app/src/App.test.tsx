@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { track } from "./analytics";
 import { emitTauriEvent, setInvokeHandler } from "./__tests__/setup";
+
+// Keep real implementations but wrap every export in a spy so tests can
+// assert which analytics events the component pipeline emits.
+vi.mock("./analytics", { spy: true });
 
 function permissionHandler(opts: {
   ax?: boolean;
@@ -151,6 +156,39 @@ describe("App routing", () => {
     // …but the capture/nudge pipeline never runs for it.
     expect(cmds).not.toContain("show_nudge");
     expect(localStorage.getItem("pluks.nudges.selects_total")).toBeNull();
+  });
+
+  it("'new-selection' clips are tracked as selection_captured", async () => {
+    localStorage.clear();
+    localStorage.setItem("pluks.onboarding.v1.seen", "1");
+    localStorage.setItem("pluks.activation.v1.seen", "1");
+    setInvokeHandler(permissionHandler({ ax: true, im: true, history: [] }));
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Search history/)).toBeInTheDocument();
+    });
+    vi.mocked(track).mockClear();
+
+    await act(async () => {
+      emitTauriEvent("new-selection", {
+        id: 8,
+        content: "https://example.com/some/page",
+        copied_at: new Date().toISOString(),
+        char_count: 29,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("https://example.com/some/page")).toBeInTheDocument();
+    });
+    // Regression: the success path never reported to PostHog (only
+    // capture-suppressed → selection_capture_failed was wired), so the
+    // desktop app showed zero successful captures in analytics, ever.
+    expect(track).toHaveBeenCalledWith("selection_captured", {
+      kind: "url",
+      char_count_bucket: "11-100",
+      had_clipboard_change: true,
+    });
   });
 
   it("titlebar shows count badge as N / 200", async () => {

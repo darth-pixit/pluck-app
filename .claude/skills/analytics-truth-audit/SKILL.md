@@ -122,11 +122,11 @@ if bots start firing more events; re-derive from the lifespan query's p99.
   do not mark them internal without confirming which are Parth's machines.
   Once confirmed, add their `distinct_id`s to cohort `282063` logic or a
   dedicated filter.
-- `scripts/analytics-digest.mjs` queries the events table directly via HogQL and
-  does NOT respect test-account filters; if its numbers must match the
-  dashboard, add `AND properties.traffic_class IS NULL` (and the postal
-  exclusion for historical ranges) to its queries.
-- Incidental finding from the audit, worth re-checking: active desktop devices
-  fired 0 `selection_captured` and 15 `selection_capture_failed` in 14 days
-  while nudges and silent pastes flowed — core capture may be broken on real
-  installs, previously masked by bot volume.
+- `scripts/analytics-digest.mjs` queries the events table directly via HogQL
+  and does NOT respect test-account filters; it carries its own copy of the
+  exclusion (the `REAL_TRAFFIC` fragment). When extending the postal list,
+  update `DC_POSTALS` there as the fourth sync point.
+- Resolved finding from the audit: the desktop app never tracked successful
+  captures (only `selection_capture_failed` was wired), so app-surface
+  `selection_captured` is zero for all history before the fix shipped — don't
+  read that gap as "capture was broken"; functional capture worked.

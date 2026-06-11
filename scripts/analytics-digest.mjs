@@ -33,6 +33,19 @@ for (const [k, v] of Object.entries(REQUIRED)) {
   if (!v) { console.error(`Missing env var: ${k}`); process.exit(1); }
 }
 
+// ── Bot exclusion ─────────────────────────────────────────────────────────────
+// These direct HogQL queries bypass the project's test-account filters, so the
+// datacenter-bot exclusion from the PostHog truth layer must be repeated here
+// (see .claude/skills/analytics-truth-audit/SKILL.md — keep the postal list in
+// sync with the "Tag datacenter bot traffic" transformation). traffic_class
+// covers events ingested after 2026-06-11; the postal list covers older events.
+// NULL-safe on postal so events without GeoIP data are kept.
+
+const DC_POSTALS = `'60602','95141','22747','23917','82010','85036','50307'`;
+const REAL_TRAFFIC = `(properties.traffic_class IS NULL
+        AND (properties.$geoip_postal_code IS NULL
+             OR properties.$geoip_postal_code NOT IN (${DC_POSTALS})))`;
+
 // ── PostHog HogQL helper ──────────────────────────────────────────────────────
 
 async function hogql(query) {
@@ -65,6 +78,7 @@ async function fetchMetrics() {
       FROM events
       WHERE event IN ('app_installed','app_launched','app_updated')
         AND timestamp >= now() - INTERVAL 2 DAY
+        AND ${REAL_TRAFFIC}
       GROUP BY event
     `),
 
@@ -79,6 +93,7 @@ async function fetchMetrics() {
         'history_item_pasted_keyboard','history_item_deleted','history_cleared'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
+        AND ${REAL_TRAFFIC}
       GROUP BY event
     `),
 
@@ -94,6 +109,7 @@ async function fetchMetrics() {
         'auto_copy_toggled','autostart_enabled'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
+        AND ${REAL_TRAFFIC}
       GROUP BY event
     `),
 
@@ -104,6 +120,7 @@ async function fetchMetrics() {
       FROM events
       WHERE event = 'app_launched'
         AND timestamp >= now() - INTERVAL 2 DAY
+        AND ${REAL_TRAFFIC}
       GROUP BY platform
       ORDER BY launches DESC
     `),
@@ -116,6 +133,7 @@ async function fetchMetrics() {
       WHERE toDate(timestamp) = today()
         AND properties.surface IS NOT NULL
         AND properties.surface != ''
+        AND ${REAL_TRAFFIC}
       GROUP BY surface
       ORDER BY events DESC
     `),
@@ -127,6 +145,7 @@ async function fetchMetrics() {
       FROM events
       WHERE event = 'smart_paste_used'
         AND toDate(timestamp) = today()
+        AND ${REAL_TRAFFIC}
       GROUP BY kind
       ORDER BY uses DESC
       LIMIT 6
@@ -141,6 +160,7 @@ async function fetchMetrics() {
         FROM events
         WHERE event = 'app_launched'
           AND timestamp >= now() - INTERVAL 2 DAY
+          AND ${REAL_TRAFFIC}
       )
     `),
 
@@ -399,6 +419,7 @@ function buildHtml(metrics) {
   <div style="text-align:center;padding:32px 0 16px;border-top:1px solid #111;margin-top:32px;">
     <div style="font-size:12px;color:#374151;">
       Pluks Analytics Digest &nbsp;·&nbsp; Powered by PostHog<br>
+      Datacenter/bot traffic excluded (truth-layer filter)<br>
       <a href="https://us.posthog.com" style="color:#6b7280;text-decoration:none;">Open PostHog dashboard →</a>
     </div>
   </div>

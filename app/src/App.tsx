@@ -425,6 +425,14 @@ export default function App() {
   useEffect(() => {
     const unlisten = listen<HistoryItem>("new-selection", event => {
       prependItem(event.payload);
+      // The success-side twin of `capture-suppressed` → selection_capture_failed
+      // below. The Rust loop only emits `new-selection` after the clipboard
+      // actually changed, hence had_clipboard_change is always true here.
+      track("selection_captured", {
+        kind: detect(event.payload.content)?.kind || "unknown",
+        char_count_bucket: bucket(event.payload.char_count),
+        had_clipboard_change: true,
+      });
       // forceShow=true → bypass AFFIRMATION_TIERS decay so the pill fires
       // on every selection. Gated by the `show_nudges` preference inside
       // runNudge; when the user turns nudges off, this branch becomes a

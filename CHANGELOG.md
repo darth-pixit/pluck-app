@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Desktop app: successful captures were never reported to analytics — only the
+  suppression path (`selection_capture_failed`) was wired, so the app showed
+  zero `selection_captured` events in PostHog for its entire history while
+  capture itself worked fine. The `new-selection` listener now tracks the
+  success event (kind, char-count bucket; never content).
+- Analytics digest: the daily email now excludes datacenter/bot traffic
+  (Chrome Web Store sandbox installs were ~98% of tracked "users"), matching
+  the PostHog truth-layer filters. Direct HogQL queries bypass PostHog's
+  test-account filters, so the exclusion is applied in the script itself.
+
 ### Changed
 - Clipboard history now keeps your last 200 clips, up from 100, in both the
   desktop app and the browser extension.
