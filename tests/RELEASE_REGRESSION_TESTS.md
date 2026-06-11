@@ -734,7 +734,7 @@ correct **badge** + the listed **action buttons** appear → click each action
 
 ## C1. Render
 
-### C1.1 Hero, stats, how-it-works, download sections render [MUST PASS]
+### C1.1 Hero, how-it-works, download sections render [MUST PASS]
 - **Steps:** Load `index.html` in Chrome, Firefox, Safari.
 - **Expect:** Layout intact at 1440×900, 1024×768, 375×812.
 

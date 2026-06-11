@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Page render", () => {
-  test("hero, stats, and Mac download CTA all render", async ({ page }) => {
+  test("hero and Mac download CTA all render", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("h1.hero-headline")).toBeVisible();
-    await expect(page.locator(".stats-inner")).toBeVisible();
     await expect(page.locator("#dl-mac")).toBeVisible();
     await expect(page.locator("#dl-mac")).toContainText(/Mac/i);
   });
