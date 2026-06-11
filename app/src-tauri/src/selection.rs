@@ -981,3 +981,213 @@ pub fn write_clipboard(text: &str) -> bool {
         .and_then(|mut c| c.set_text(text).ok())
         .is_some()
 }
+
+// ── Clipboard change detection & concealed-content filtering ────────────────────
+//
+// The clipboard poller (`start_clipboard_poller` in lib.rs) records *any*
+// clipboard change into history — manual Cmd+C / Ctrl+C, right-click → Copy,
+// "Copy" buttons, copies from other apps — not just the select-to-copy gesture
+// the rest of this module drives. Two platform primitives gate it:
+//
+//   * `clipboard_change_token` — a cheap, monotonically-changing token (macOS
+//     `NSPasteboard.changeCount`, Windows `GetClipboardSequenceNumber`). The
+//     poller only performs the expensive type-inspection + text read when this
+//     advances. X11/Wayland expose no comparable counter through arboard, so
+//     Linux returns `None` and the poller falls back to content comparison.
+//
+//   * `clipboard_is_concealed` — true when the current clipboard owner asked
+//     clipboard managers NOT to persist the content. This is the mechanism
+//     password managers use to keep copied secrets out of clipboard history.
+//     We honor the de-facto cross-platform conventions:
+//       - macOS:   `org.nspasteboard.ConcealedType` / `org.nspasteboard.TransientType`
+//       - Windows: `ExcludeClipboardContentFromMonitorProcessing` (presence) and
+//                  `CanIncludeInClipboardHistory` (a DWORD whose value is 0)
+//     When this returns true the poller never even reads the text — a copied
+//     password never enters a Rust `String`, the database, or the live panel.
+
+#[cfg(target_os = "macos")]
+pub fn clipboard_change_token() -> Option<u64> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    unsafe {
+        extern "C" {
+            fn objc_getClass(name: *const u8) -> *mut AnyObject;
+        }
+        let cls = objc_getClass(b"NSPasteboard\0".as_ptr());
+        if cls.is_null() {
+            return None;
+        }
+        let pb: *mut AnyObject = msg_send![cls, generalPasteboard];
+        if pb.is_null() {
+            return None;
+        }
+        let count: i64 = msg_send![pb, changeCount];
+        Some(count as u64)
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn clipboard_is_concealed() -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use std::os::raw::c_char;
+    use std::ptr;
+    unsafe {
+        extern "C" {
+            fn objc_getClass(name: *const u8) -> *mut AnyObject;
+        }
+        // The poller calls this every time the clipboard changes. `-types`
+        // returns an autoreleased NSArray of autoreleased NSStrings; without a
+        // pool around them they'd leak on this long-lived worker thread.
+        let pool_cls = objc_getClass(b"NSAutoreleasePool\0".as_ptr());
+        let pool: *mut AnyObject = if pool_cls.is_null() {
+            ptr::null_mut()
+        } else {
+            let p: *mut AnyObject = msg_send![pool_cls, alloc];
+            msg_send![p, init]
+        };
+
+        let mut concealed = false;
+        let cls = objc_getClass(b"NSPasteboard\0".as_ptr());
+        if !cls.is_null() {
+            let pb: *mut AnyObject = msg_send![cls, generalPasteboard];
+            if !pb.is_null() {
+                let types: *mut AnyObject = msg_send![pb, types];
+                if !types.is_null() {
+                    let count: usize = msg_send![types, count];
+                    for i in 0..count {
+                        let t: *mut AnyObject = msg_send![types, objectAtIndex: i];
+                        if t.is_null() {
+                            continue;
+                        }
+                        let utf8: *const c_char = msg_send![t, UTF8String];
+                        if utf8.is_null() {
+                            continue;
+                        }
+                        if let Ok(s) = std::ffi::CStr::from_ptr(utf8).to_str() {
+                            if s == "org.nspasteboard.ConcealedType"
+                                || s == "org.nspasteboard.TransientType"
+                            {
+                                concealed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !pool.is_null() {
+            let _: () = msg_send![pool, drain];
+        }
+        concealed
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn clipboard_change_token() -> Option<u64> {
+    extern "system" {
+        fn GetClipboardSequenceNumber() -> u32;
+    }
+    unsafe { Some(GetClipboardSequenceNumber() as u64) }
+}
+
+#[cfg(target_os = "windows")]
+pub fn clipboard_is_concealed() -> bool {
+    use std::ffi::c_void;
+    extern "system" {
+        fn RegisterClipboardFormatA(lpsz: *const u8) -> u32;
+        fn IsClipboardFormatAvailable(format: u32) -> i32;
+        fn OpenClipboard(hwnd: *mut c_void) -> i32;
+        fn CloseClipboard() -> i32;
+        fn GetClipboardData(format: u32) -> *mut c_void;
+        fn GlobalLock(h: *mut c_void) -> *mut c_void;
+        fn GlobalUnlock(h: *mut c_void) -> i32;
+    }
+    unsafe {
+        // Unambiguous: the mere presence of this format means "exclude from all
+        // clipboard monitoring / history" (set by KeePass and similar). No
+        // value to read.
+        let exclude =
+            RegisterClipboardFormatA(b"ExcludeClipboardContentFromMonitorProcessing\0".as_ptr());
+        if exclude != 0 && IsClipboardFormatAvailable(exclude) != 0 {
+            return true;
+        }
+        // `CanIncludeInClipboardHistory` is a DWORD: value 0 means "do not keep
+        // in history", value 1 means "allowed". Presence alone is NOT exclusion,
+        // so we must read the value. Reading needs the clipboard open; the
+        // poller calls this BEFORE its arboard read, so there's no contention.
+        let hist = RegisterClipboardFormatA(b"CanIncludeInClipboardHistory\0".as_ptr());
+        if hist != 0 && IsClipboardFormatAvailable(hist) != 0 {
+            // Another process may briefly own the clipboard — retry a few
+            // times. If we ultimately can't read the value, fail safe to
+            // "concealed": dropping one clip is better than persisting a secret
+            // its owner explicitly flagged.
+            let null_hwnd: *mut c_void = std::ptr::null_mut();
+            for _ in 0..5 {
+                if OpenClipboard(null_hwnd) != 0 {
+                    let mut excluded = true;
+                    let h = GetClipboardData(hist);
+                    if !h.is_null() {
+                        let p = GlobalLock(h);
+                        if !p.is_null() {
+                            excluded = *(p as *const u32) == 0;
+                            GlobalUnlock(h);
+                        }
+                    }
+                    CloseClipboard();
+                    return excluded;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            return true;
+        }
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn clipboard_change_token() -> Option<u64> {
+    // X11 exposes no cheap clipboard sequence number through arboard, and
+    // Wayland clipboard semantics vary by compositor. The poller falls back to
+    // comparing the current clipboard text against the last value it recorded.
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn clipboard_is_concealed() -> bool {
+    // KNOWN LIMITATION: no concealed-content filtering on Linux yet. The
+    // klipper/KDE convention is the `x-kde-passwordManagerHint=secret` X11
+    // selection target; honoring it means inspecting selection targets below
+    // arboard (raw X11 / Wayland data-control), which we don't do here. Mirrors
+    // `focus_is_secure_field`, which is likewise macOS-only today. Tracked for a
+    // follow-up; until then Linux users with KDE password managers won't get the
+    // concealed-type skip.
+    false
+}
+
+#[cfg(test)]
+mod clipboard_primitive_tests {
+    // The macOS / Windows variants are FFI into NSPasteboard / Win32 and are
+    // exercised by the per-OS build-smoke jobs in CI; here we pin the documented
+    // Linux fallback contract the poller relies on (no change token → content
+    // comparison; no concealed filtering yet).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_has_no_change_token() {
+        assert!(
+            super::clipboard_change_token().is_none(),
+            "Linux must report no clipboard sequence number so the poller \
+             falls back to content comparison"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_reports_not_concealed() {
+        assert!(
+            !super::clipboard_is_concealed(),
+            "Linux concealed detection is a documented no-op for now"
+        );
+    }
+}
