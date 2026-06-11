@@ -138,14 +138,19 @@ pub struct AppState {
     /// select-to-replace gesture and we skip the capture so their paste
     /// lands the prior clipboard contents in the destination.
     pub paste_seq: Arc<AtomicU64>,
-    /// The last clipboard text Pluks itself recorded or wrote. Shared
-    /// between every path that touches the clipboard — the select-to-copy
-    /// processor, the clipboard poller, long-press paste, and the
-    /// copy-from-history commands — so the poller can tell a genuine
-    /// external copy apart from an echo of Pluks's own write. Without it,
-    /// clicking a history item to re-copy it would round-trip back through
-    /// the poller and pile up duplicate rows.
+    /// The last clipboard text Pluks itself recorded or wrote. The Linux
+    /// fallback echo key: with no change token there, the poller compares the
+    /// clipboard text against this to tell its own write apart from an external
+    /// copy. (macOS/Windows use the precise `self_write_token` below instead.)
     pub last_recorded_clip: Arc<Mutex<Option<String>>>,
+    /// The clipboard change token (`clipboard_change_token`) produced by Pluks's
+    /// own most recent clipboard write — copying a history item, a long-press
+    /// paste, or the select-to-copy synthetic Cmd+C. On macOS/Windows the poller
+    /// compares the live token against this to recognize its own echo precisely,
+    /// so a genuine *re-copy* of the same text (which carries a NEW token) is
+    /// still captured rather than suppressed as a duplicate. `None` on Linux,
+    /// which has no change token.
+    pub self_write_token: Arc<Mutex<Option<u64>>>,
 }
 
 impl AppState {
@@ -184,20 +189,38 @@ impl AppState {
             .map(|t| t.elapsed().as_millis())
     }
     /// Remember `text` as the most recent clipboard value Pluks is responsible
-    /// for, so the poller treats a subsequent clipboard change to the same
-    /// value as an echo of our own write rather than a fresh external copy.
+    /// for (the Linux fallback echo key).
     fn remember_clip(&self, text: &str) {
         *self.last_recorded_clip.lock().unwrap_or_else(|p| p.into_inner()) = Some(text.to_string());
     }
-    fn last_recorded_clip(&self) -> Option<String> {
-        self.last_recorded_clip.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    /// True when the stored "last recorded" text equals `text`. Compared under
+    /// the lock so the poller never clones the stored string on a hot tick.
+    fn last_recorded_matches(&self, text: &str) -> bool {
+        self.last_recorded_clip
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_deref()
+            == Some(text)
     }
-    /// Write `text` to the system clipboard AND stamp it as Pluks-originated in
-    /// one step, closing the race where the poller could observe the change
-    /// before we recorded that we caused it.
+    fn self_write_token(&self) -> Option<u64> {
+        *self.self_write_token.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    /// Record the clipboard change token our own write just produced, so the
+    /// poller recognizes the resulting change as an echo (macOS/Windows).
+    fn mark_self_write(&self) {
+        *self.self_write_token.lock().unwrap_or_else(|p| p.into_inner()) = clipboard_change_token();
+    }
+    /// Write `text` to the system clipboard and, only on a confirmed success,
+    /// stamp it as Pluks-originated (text + change token). Stamping *after* the
+    /// write avoids poisoning the echo key on a failed write — otherwise a later
+    /// genuine external copy of the same text would be silently dropped.
     fn write_clipboard_remembered(&self, text: &str) -> bool {
-        self.remember_clip(text);
-        write_clipboard(text)
+        let ok = write_clipboard(text);
+        if ok {
+            self.remember_clip(text);
+            self.mark_self_write();
+        }
+        ok
     }
 }
 
@@ -782,8 +805,10 @@ fn start_copy_processor(
                         state.mark_capture();
                         // Stamp before notifying so the poller treats the
                         // synthetic-copy clipboard change as an echo of this
-                        // capture, not a second external clip.
+                        // capture, not a second external clip — by token
+                        // (macOS/Windows) and by text (Linux fallback).
                         state.remember_clip(&item.content);
+                        state.mark_self_write();
                         let _ = app_handle.emit(EVT_NEW_SELECTION, &item);
                     }
                 }
@@ -808,44 +833,81 @@ fn start_copy_processor(
 // it is the only capture path that works under Wayland.
 
 const CLIPBOARD_POLL_MS: u64 = 500;
+// A dropped X11 / Wayland display connection makes every arboard read fail on
+// the existing handle indefinitely. After this many consecutive empty reads the
+// poller rebuilds the handle so it recovers without an app restart. Non-text
+// clipboards (images) also read empty, so we only rebuild after a sustained
+// streak and reset on any successful read.
+const POLLER_REBUILD_AFTER_EMPTY: u32 = 10;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum SkipReason {
+    Disabled,
+    PanelVisible,
+    Concealed,
+    SelfEcho,
+    Empty,
+    Unchanged,
+}
+
+impl SkipReason {
+    /// Transient *external* blocks — the user paused Pluks, or has the panel
+    /// open — are not tied to the current clipboard content. The loop must NOT
+    /// consume the change token for these, so a clip copied while blocked is
+    /// still captured once the block clears. Every content-tied reason consumes
+    /// it. Returning a typed flag (rather than re-matching reason strings in the
+    /// loop) keeps the two in sync at compile time.
+    fn is_transient(self) -> bool {
+        matches!(self, SkipReason::Disabled | SkipReason::PanelVisible)
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum PollOutcome {
-    Skip(&'static str),
+    Skip(SkipReason),
     Record(String),
 }
 
 /// Pure decision for one poll tick. Split out so the full suppression matrix is
 /// unit-testable without a clipboard, a database, or Tauri. The platform reads
-/// (change token, concealed flag, clipboard text) happen in the loop and are
-/// passed in here.
+/// (change token, concealed flag, clipboard text) happen in the loop.
 ///
-/// Precedence is intentional: `enabled` and `panel_visible` are *transient
-/// external* states (the user paused Pluks, or has the panel open) and are
-/// checked first; `concealed` is a privacy hard-stop; then content-tied
-/// reasons. The caller uses the reason string to decide whether to consume the
-/// change token (see the loop).
+/// Echo suppression takes two inputs because the platforms differ:
+/// `is_self_echo` is the precise macOS/Windows signal (the live change token
+/// equals the one Pluks's own write produced), while `is_duplicate` is the Linux
+/// fallback (no change token, so the text is compared against the last value we
+/// recorded). Keeping them separate is what lets a genuine *re-copy* of the same
+/// text be captured on macOS/Windows — it carries a new token, so `is_self_echo`
+/// is false — while Linux still can't tell a re-copy from the same text sitting
+/// on the clipboard (an inherent OS limitation, not a bug).
+///
+/// Precedence: transient external blocks first (`enabled`, `panel_visible`),
+/// then the `concealed` privacy hard-stop, then echo, then content.
 fn decide_poll(
     enabled: bool,
     panel_visible: bool,
     concealed: bool,
+    is_self_echo: bool,
     clipboard_text: Option<String>,
-    last_recorded: Option<&str>,
+    is_duplicate: bool,
 ) -> PollOutcome {
     if !enabled {
-        return PollOutcome::Skip("disabled");
+        return PollOutcome::Skip(SkipReason::Disabled);
     }
     if panel_visible {
-        return PollOutcome::Skip("panel_visible");
+        return PollOutcome::Skip(SkipReason::PanelVisible);
     }
     if concealed {
-        return PollOutcome::Skip("concealed");
+        return PollOutcome::Skip(SkipReason::Concealed);
+    }
+    if is_self_echo {
+        return PollOutcome::Skip(SkipReason::SelfEcho);
     }
     let Some(text) = clipboard_text else {
-        return PollOutcome::Skip("empty");
+        return PollOutcome::Skip(SkipReason::Empty);
     };
-    if last_recorded == Some(text.as_str()) {
-        return PollOutcome::Skip("unchanged");
+    if is_duplicate {
+        return PollOutcome::Skip(SkipReason::Unchanged);
     }
     PollOutcome::Record(text)
 }
@@ -855,6 +917,19 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // One reused arboard handle, like the copy processor.
         let mut clip: Option<Clipboard> = Clipboard::new().ok();
         let mut last_token = clipboard_change_token();
+
+        // Seed the baseline so whatever is already on the clipboard at launch is
+        // NOT captured as a fresh copy. macOS/Windows gate the first read on the
+        // change token, but Linux has none — without this the first tick would
+        // record the pre-existing clipboard (possibly a secret copied before
+        // Pluks started). Don't read it when it's flagged concealed.
+        if !clipboard_is_concealed() {
+            if let Some(t) = read_clipboard(&mut clip) {
+                state.remember_clip(&t);
+            }
+        }
+
+        let mut empty_streak: u32 = 0;
 
         loop {
             thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
@@ -882,17 +957,54 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                 read_clipboard(&mut clip)
             };
 
+            // Recover a stale clipboard handle (e.g. a display reconnect, which
+            // makes every read fail forever): rebuild after a sustained run of
+            // empty reads. A successful read or a concealed tick resets the
+            // streak, so image / non-text copies don't trigger needless rebuilds.
+            if text.is_none() && !concealed {
+                empty_streak = empty_streak.saturating_add(1);
+                if empty_streak >= POLLER_REBUILD_AFTER_EMPTY {
+                    clip = Clipboard::new().ok();
+                    empty_streak = 0;
+                }
+            } else {
+                empty_streak = 0;
+            }
+
+            // Echo suppression. macOS/Windows: a genuine re-copy of the same text
+            // carries a NEW change token, so comparing against the token Pluks's
+            // own write produced distinguishes our echo from a real re-copy.
+            let is_self_echo = match (token, state.self_write_token()) {
+                (Some(t), Some(st)) => t == st,
+                _ => false,
+            };
+            // Linux-only duplicate gate: with no token we can't tell a re-copy
+            // from the same text still on the clipboard, so identical text is
+            // suppressed. Compared under the lock to avoid cloning the stored
+            // string every tick, and short-circuited to `false` when a token
+            // exists (macOS/Windows rely on `is_self_echo` instead).
+            let is_duplicate = match &text {
+                Some(t) => token.is_none() && state.last_recorded_matches(t),
+                None => false,
+            };
+
             let outcome = decide_poll(
                 state.watcher_enabled(),
                 panel_visible(&app_handle),
                 concealed,
+                is_self_echo,
                 text,
-                state.last_recorded_clip().as_deref(),
+                is_duplicate,
             );
 
             match outcome {
                 PollOutcome::Record(t) => {
-                    if let Ok(item) = state.db().insert(&t) {
+                    // Bind the insert result first so the DB MutexGuard is
+                    // dropped before remember_clip + the IPC emit — otherwise the
+                    // lock would be held across both, needlessly contending with
+                    // get_history and the capture path.
+                    let inserted = state.db().insert(&t);
+                    if let Ok(item) = inserted {
                         state.remember_clip(&item.content);
                         // `history-added`, not `new-selection`: this updates the
                         // panel list but must NOT run the affirmation/nudge
@@ -908,7 +1020,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                     // transient external blocks (auto-copy disabled, panel
                     // open) leave it unconsumed so the clip is captured the
                     // moment the block clears.
-                    if !matches!(reason, "disabled" | "panel_visible") {
+                    if !reason.is_transient() {
                         last_token = token;
                     }
                 }
@@ -1038,6 +1150,7 @@ pub fn run() {
                 nudge_gen: Arc::new(AtomicU64::new(0)),
                 paste_seq: Arc::new(AtomicU64::new(0)),
                 last_recorded_clip: Arc::new(Mutex::new(None)),
+                self_write_token: Arc::new(Mutex::new(None)),
             });
             app.manage(state.clone());
 
@@ -1411,37 +1524,51 @@ mod replace_guard_tests {
 
 #[cfg(test)]
 mod poll_tests {
-    use super::{decide_poll, PollOutcome};
+    use super::{decide_poll, PollOutcome, SkipReason};
 
     fn text(s: &str) -> Option<String> {
         Some(s.to_string())
     }
 
+    // Signature reminder:
+    //   decide_poll(enabled, panel_visible, concealed, is_self_echo,
+    //               clipboard_text, is_duplicate)
+
     // ── The happy path ────────────────────────────────────────────────────
 
     #[test]
     fn records_a_fresh_external_copy() {
-        // Manual Cmd+C of brand-new text with nothing previously recorded.
-        let out = decide_poll(true, false, false, text("hello"), None);
+        // Manual Cmd+C of brand-new text, not an echo, not a duplicate.
+        let out = decide_poll(true, false, false, false, text("hello"), false);
         assert_eq!(out, PollOutcome::Record("hello".into()));
     }
 
     #[test]
-    fn records_when_clipboard_differs_from_last_recorded() {
-        // Pluks last recorded "old"; the user has since copied "new" elsewhere.
-        let out = decide_poll(true, false, false, text("new"), Some("old"));
-        assert_eq!(out, PollOutcome::Record("new".into()));
+    fn records_a_recopy_on_platforms_with_a_change_token() {
+        // macOS/Windows: the user re-copies the same text. It carries a NEW
+        // token, so it is NOT our echo (is_self_echo=false) and the Linux-only
+        // duplicate gate is off (is_duplicate=false) — so it IS recorded. This
+        // is the fix for "re-copying after Clear All / delete won't re-add it".
+        let out = decide_poll(true, false, false, false, text("same"), false);
+        assert_eq!(out, PollOutcome::Record("same".into()));
     }
 
     // ── Echo suppression ──────────────────────────────────────────────────
 
     #[test]
-    fn skips_echo_of_pluks_own_write() {
-        // The clipboard matches what Pluks just wrote/recorded — clicking a
-        // history item, a long-press paste, or the synthetic-copy capture. Must
-        // NOT round-trip back into a duplicate row.
-        let out = decide_poll(true, false, false, text("same"), Some("same"));
-        assert_eq!(out, PollOutcome::Skip("unchanged"));
+    fn skips_self_echo_by_token() {
+        // macOS/Windows: the live change token equals the one Pluks's own write
+        // produced (clicking a history item, long-press paste, synthetic copy).
+        let out = decide_poll(true, false, false, true, text("same"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::SelfEcho));
+    }
+
+    #[test]
+    fn skips_duplicate_text_on_linux_fallback() {
+        // Linux: no token, so identical text to the last recorded value is
+        // suppressed (the loop sets is_duplicate when token.is_none()).
+        let out = decide_poll(true, false, false, false, text("same"), true);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Unchanged));
     }
 
     // ── Privacy hard-stop ─────────────────────────────────────────────────
@@ -1452,20 +1579,27 @@ mod poll_tests {
         // it never reads concealed content, but even if text leaked through we
         // must still skip.
         assert_eq!(
-            decide_poll(true, false, true, None, None),
-            PollOutcome::Skip("concealed")
+            decide_poll(true, false, true, false, None, false),
+            PollOutcome::Skip(SkipReason::Concealed)
         );
         assert_eq!(
-            decide_poll(true, false, true, text("hunter2"), None),
-            PollOutcome::Skip("concealed")
+            decide_poll(true, false, true, false, text("hunter2"), false),
+            PollOutcome::Skip(SkipReason::Concealed)
         );
     }
 
     #[test]
     fn concealed_beats_a_genuinely_new_value() {
         // Even brand-new, never-before-seen text is dropped when concealed.
-        let out = decide_poll(true, false, true, text("brand new secret"), Some("old"));
-        assert_eq!(out, PollOutcome::Skip("concealed"));
+        let out = decide_poll(true, false, true, false, text("brand new secret"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Concealed));
+    }
+
+    #[test]
+    fn concealed_beats_self_echo() {
+        // Privacy hard-stop outranks the echo check.
+        let out = decide_poll(true, false, true, true, text("x"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Concealed));
     }
 
     // ── Transient external blocks ─────────────────────────────────────────
@@ -1475,28 +1609,28 @@ mod poll_tests {
         // `disabled` wins over everything, including a fresh value — the user
         // paused Pluks. The loop leaves the change token unconsumed on this
         // reason so the clip is still captured if they re-enable.
-        let out = decide_poll(false, false, false, text("fresh"), None);
-        assert_eq!(out, PollOutcome::Skip("disabled"));
+        let out = decide_poll(false, false, false, false, text("fresh"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Disabled));
     }
 
     #[test]
-    fn disabled_takes_precedence_over_concealed_and_panel() {
-        let out = decide_poll(false, true, true, text("x"), None);
-        assert_eq!(out, PollOutcome::Skip("disabled"));
+    fn disabled_takes_precedence_over_everything() {
+        let out = decide_poll(false, true, true, true, text("x"), true);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Disabled));
     }
 
     #[test]
     fn skips_when_panel_visible() {
         // Panel open (incl. the activation tour, which records via
         // `record_history` instead). Transient — token left unconsumed.
-        let out = decide_poll(true, true, false, text("fresh"), None);
-        assert_eq!(out, PollOutcome::Skip("panel_visible"));
+        let out = decide_poll(true, true, false, false, text("fresh"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::PanelVisible));
     }
 
     #[test]
     fn panel_takes_precedence_over_concealed() {
-        let out = decide_poll(true, true, true, text("x"), None);
-        assert_eq!(out, PollOutcome::Skip("panel_visible"));
+        let out = decide_poll(true, true, true, false, text("x"), false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::PanelVisible));
     }
 
     // ── Empty / no-text clipboard ─────────────────────────────────────────
@@ -1504,44 +1638,31 @@ mod poll_tests {
     #[test]
     fn skips_when_clipboard_has_no_text() {
         // Image/file copy, or `read_clipboard` filtered an all-whitespace clip.
-        let out = decide_poll(true, false, false, None, Some("prev"));
-        assert_eq!(out, PollOutcome::Skip("empty"));
+        let out = decide_poll(true, false, false, false, None, false);
+        assert_eq!(out, PollOutcome::Skip(SkipReason::Empty));
     }
 
     // ── Token-consumption contract the loop depends on ────────────────────
     //
-    // The loop consumes the change token for every reason EXCEPT "disabled"
-    // and "panel_visible" (so a clip copied during a transient block is still
-    // captured once it clears). These tests pin which reason strings drive
-    // that branch, so a future rename can't silently break the behavior.
-
-    fn reason(out: &PollOutcome) -> &'static str {
-        match out {
-            PollOutcome::Skip(r) => r,
-            PollOutcome::Record(_) => "record",
-        }
-    }
+    // The loop consumes the change token for every reason EXCEPT the transient
+    // external blocks (so a clip copied during a block is still captured once it
+    // clears). `SkipReason::is_transient` is the single source of truth — these
+    // tests pin exactly which variants it covers so a future addition can't
+    // silently change the loop's behavior.
 
     #[test]
-    fn transient_block_reasons_are_exactly_disabled_and_panel() {
-        assert_eq!(
-            reason(&decide_poll(false, false, false, text("a"), None)),
-            "disabled"
-        );
-        assert_eq!(
-            reason(&decide_poll(true, true, false, text("a"), None)),
-            "panel_visible"
-        );
-        // Everything else is a content-tied reason the loop consumes the token
-        // for, so it isn't re-inspected every tick.
+    fn only_disabled_and_panel_are_transient() {
+        assert!(SkipReason::Disabled.is_transient());
+        assert!(SkipReason::PanelVisible.is_transient());
         for r in [
-            reason(&decide_poll(true, false, true, None, None)),
-            reason(&decide_poll(true, false, false, None, None)),
-            reason(&decide_poll(true, false, false, text("a"), Some("a"))),
+            SkipReason::Concealed,
+            SkipReason::SelfEcho,
+            SkipReason::Empty,
+            SkipReason::Unchanged,
         ] {
             assert!(
-                !matches!(r, "disabled" | "panel_visible"),
-                "reason {r:?} must not be treated as a transient block"
+                !r.is_transient(),
+                "{r:?} is content-tied — the loop must consume the token for it"
             );
         }
     }

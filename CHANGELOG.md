@@ -39,7 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     even before Accessibility / Input Monitoring are granted, and is the first
     capture path that functions under Wayland.
   - "Disable Auto-Copy" pauses the watcher too; Pluks's own writes (copying a
-    history item, long-press paste) don't echo back as duplicate entries.
+    history item, long-press paste) don't echo back as duplicate entries, while
+    genuinely re-copying the same text still moves it back to the top. Content
+    already on the clipboard when the app launches isn't captured, and the
+    watcher recovers on its own if the clipboard connection drops.
 - Website: a feedback widget pinned to the bottom-right of every page. Visitors
   can write a query, bug report, or idea and send it — the form hands off to a
   pre-filled email to parth.dixit@alumni.iitd.ac.in (also shown as a direct
