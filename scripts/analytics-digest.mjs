@@ -55,7 +55,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, sparkline, funnel] = await Promise.all([
 
     hogql(`
       SELECT
@@ -76,7 +76,8 @@ async function fetchMetrics() {
       FROM events
       WHERE event IN (
         'panel_opened','history_item_clicked','history_searched',
-        'history_item_pasted_keyboard','history_item_deleted','history_cleared'
+        'history_item_pasted_keyboard','history_item_deleted','history_cleared',
+        'manual_copy_pressed'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
       GROUP BY event
@@ -91,7 +92,7 @@ async function fetchMetrics() {
       WHERE event IN (
         'selection_captured','selection_capture_failed','smart_paste_used',
         'error_uncaught_js','error_tauri_invoke_failed','error_rust_panic',
-        'auto_copy_toggled','autostart_enabled'
+        'auto_copy_toggled','long_press_paste_toggled'
       )
         AND timestamp >= now() - INTERVAL 2 DAY
       GROUP BY event
@@ -144,9 +145,45 @@ async function fetchMetrics() {
       )
     `),
 
+    // WAU and MAU
+    hogql(`
+      SELECT
+        countIf(timestamp >= now() - INTERVAL 7 DAY)  AS wau,
+        countIf(timestamp >= now() - INTERVAL 30 DAY) AS mau
+      FROM (
+        SELECT DISTINCT distinct_id, toDate(timestamp) AS day, timestamp
+        FROM events
+        WHERE event = 'app_launched'
+          AND timestamp >= now() - INTERVAL 30 DAY
+      )
+    `),
+
+    // 7-day DAU sparkline
+    hogql(`
+      SELECT
+        toDate(timestamp) AS day,
+        count(DISTINCT distinct_id) AS dau
+      FROM events
+      WHERE event = 'app_launched'
+        AND timestamp >= now() - INTERVAL 7 DAY
+      GROUP BY day
+      ORDER BY day ASC
+    `),
+
+    // Onboarding / activation funnel (all time installs ≤ 7d old)
+    hogql(`
+      SELECT
+        countIf(event = 'onboarding_started')   AS ob_started,
+        countIf(event = 'onboarding_completed') AS ob_completed,
+        countIf(event = 'activation_completed') AS activated
+      FROM events
+      WHERE event IN ('onboarding_started','onboarding_completed','activation_completed')
+        AND timestamp >= now() - INTERVAL 7 DAY
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, sparkline, funnel };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -168,42 +205,64 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, wauMau, sparkline, funnel } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
   });
 
-  const launches   = rowFromData(traffic, 'app_launched');
-  const installs   = rowFromData(traffic, 'app_installed');
-  const updates    = rowFromData(traffic, 'app_updated');
-  const panelOpens = rowFromData(product, 'panel_opened');
-  const histClicks = rowFromData(product, 'history_item_clicked');
-  const searches   = rowFromData(product, 'history_searched');
-  const pastes     = rowFromData(product, 'history_item_pasted_keyboard');
-  const deletes    = rowFromData(product, 'history_item_deleted');
-  const clears     = rowFromData(product, 'history_cleared');
-  const selections = rowFromData(usage, 'selection_captured');
-  const capFails   = rowFromData(usage, 'selection_capture_failed');
-  const smartTotal = rowFromData(usage, 'smart_paste_used');
-  const jsErrors   = rowFromData(usage, 'error_uncaught_js');
-  const tauriErrs  = rowFromData(usage, 'error_tauri_invoke_failed');
-  const rustPanics = rowFromData(usage, 'error_rust_panic');
+  const launches      = rowFromData(traffic, 'app_launched');
+  const installs      = rowFromData(traffic, 'app_installed');
+  const updates       = rowFromData(traffic, 'app_updated');
+  const panelOpens    = rowFromData(product, 'panel_opened');
+  const histClicks    = rowFromData(product, 'history_item_clicked');
+  const searches      = rowFromData(product, 'history_searched');
+  const pastes        = rowFromData(product, 'history_item_pasted_keyboard');
+  const deletes       = rowFromData(product, 'history_item_deleted');
+  const clears        = rowFromData(product, 'history_cleared');
+  const manualCopies  = rowFromData(product, 'manual_copy_pressed');
+  const selections    = rowFromData(usage, 'selection_captured');
+  const capFails      = rowFromData(usage, 'selection_capture_failed');
+  const smartTotal    = rowFromData(usage, 'smart_paste_used');
+  const jsErrors      = rowFromData(usage, 'error_uncaught_js');
+  const tauriErrs     = rowFromData(usage, 'error_tauri_invoke_failed');
+  const rustPanics    = rowFromData(usage, 'error_rust_panic');
 
   const dauToday = dau[0]?.dau_today ?? 0;
   const dauYest  = dau[0]?.dau_yesterday ?? 0;
   const dauDelta = delta(dauToday, dauYest);
 
-  const totalErrors = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
+  const wau = wauMau[0]?.wau ?? 0;
+  const mau = wauMau[0]?.mau ?? 0;
+
+  const totalErrors     = (jsErrors.today ?? 0) + (tauriErrs.today ?? 0) + (rustPanics.today ?? 0);
   const totalErrorsYest = (jsErrors.yesterday ?? 0) + (tauriErrs.yesterday ?? 0) + (rustPanics.yesterday ?? 0);
-  const errDelta = delta(totalErrors, totalErrorsYest);
+
+  const obStarted   = funnel[0]?.ob_started ?? 0;
+  const obCompleted = funnel[0]?.ob_completed ?? 0;
+  const activated   = funnel[0]?.activated ?? 0;
+  const funnelConv  = obStarted > 0 ? ((activated / obStarted) * 100).toFixed(0) : null;
 
   const platformTotal = platforms.reduce((s, r) => s + (r.launches ?? 0), 0) || 1;
   const surfaceTotal  = surfaces.reduce((s, r) => s + (r.events ?? 0), 0) || 1;
   const smartTotal_n  = smartPaste.reduce((s, r) => s + (r.uses ?? 0), 0) || 1;
 
-  const COLORS = { macos: '#6ee7b7', windows: '#60a5fa', linux: '#f59e0b', unknown: '#6b7280' };
+  const COLORS      = { macos: '#6ee7b7', windows: '#60a5fa', linux: '#f59e0b', unknown: '#6b7280' };
   const SURF_COLORS = { app: '#6ee7b7', ext: '#a78bfa', web: '#fb923c', unknown: '#6b7280' };
+
+  // 7-day sparkline bars
+  const sparkMax   = Math.max(...sparkline.map(r => r.dau ?? 0), 1);
+  const sparkBars  = (() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const row = sparkline.find(r => r.day === key);
+      days.push({ key, dau: row?.dau ?? 0, label: d.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' }) });
+    }
+    return days;
+  })();
 
   function card(label, value, d, invertDelta = false) {
     const { pct, dir } = d;
@@ -264,8 +323,8 @@ function buildHtml(metrics) {
       </td>`;
   }
 
-  const platformBar   = barSegments(platforms, platformTotal, COLORS);
-  const surfaceBar    = barSegments(surfaces.map(s => ({...s, platform: s.surface})), surfaceTotal, SURF_COLORS);
+  const platformBar    = barSegments(platforms, platformTotal, COLORS);
+  const surfaceBar     = barSegments(surfaces.map(s => ({...s, platform: s.surface})), surfaceTotal, SURF_COLORS);
   const platformLegend = platforms.map(p => legendItem(p.platform || 'unknown', p.launches ?? 0, platformTotal, COLORS)).join('');
   const surfaceLegend  = surfaces.map(s => legendItem(s.surface || 'unknown', s.events ?? 0, surfaceTotal, SURF_COLORS)).join('');
 
@@ -277,6 +336,36 @@ function buildHtml(metrics) {
           <td style="padding:8px 16px;text-align:right;border-bottom:1px solid #1c1c1c;font-size:12px;color:#6b7280;">${((r.uses / smartTotal_n) * 100).toFixed(0)}%</td>
         </tr>`).join('')
     : `<tr><td colspan="3" style="padding:16px;text-align:center;color:#374151;font-size:13px;">No smart paste usage today</td></tr>`;
+
+  // sparkline bar chart HTML
+  const sparkHtml = sparkBars.map(({ dau: d, label }) => {
+    const heightPct = sparkMax > 0 ? Math.round((d / sparkMax) * 48) : 0;
+    const isToday   = label === new Date().toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' });
+    const barColor  = isToday ? '#6ee7b7' : '#2d4a3e';
+    const textColor = isToday ? '#6ee7b7' : '#4b5563';
+    return `
+      <td style="text-align:center;vertical-align:bottom;padding:0 3px;width:${100/7}%;">
+        <div style="font-size:10px;color:${textColor};margin-bottom:3px;">${d > 0 ? num(d) : ''}</div>
+        <div style="height:${heightPct}px;min-height:2px;background:${barColor};border-radius:2px 2px 0 0;"></div>
+        <div style="font-size:10px;color:${textColor};margin-top:4px;">${label}</div>
+      </td>`;
+  }).join('');
+
+  // funnel steps
+  function funnelStep(label, count, base) {
+    const pct = base > 0 ? ((count / base) * 100).toFixed(0) : 0;
+    const barW = base > 0 ? Math.max(4, Math.round((count / base) * 100)) : 4;
+    return `
+      <div style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:#9ca3af;">${label}</span>
+          <span style="font-size:12px;font-weight:600;color:#f9fafb;">${num(count)} <span style="color:#6b7280;font-weight:400;">(${pct}%)</span></span>
+        </div>
+        <div style="height:6px;background:#1c1c1c;border-radius:3px;">
+          <div style="height:6px;width:${barW}%;background:#6ee7b7;border-radius:3px;"></div>
+        </div>
+      </div>`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -296,15 +385,42 @@ function buildHtml(metrics) {
     <div style="font-size:13px;color:#4b5563;margin-top:6px;">${date} &nbsp;·&nbsp; Asia/Kolkata</div>
   </div>
 
-  <!-- DAU hero -->
-  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
-    <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
-    <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
-    ${dauDelta.pct !== null
-      ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
-           ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
-         </div>`
-      : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+  <!-- DAU / WAU / MAU hero -->
+  <div style="background:linear-gradient(135deg,#0d1f17 0%,#111 100%);border:1px solid #1c2e22;border-radius:12px;padding:24px;margin:24px 0;">
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Daily Active Users</div>
+      <div style="font-size:48px;font-weight:800;color:#6ee7b7;letter-spacing:-2px;">${num(dauToday)}</div>
+      ${dauDelta.pct !== null
+        ? `<div style="font-size:13px;color:${dauDelta.dir === 'up' ? '#10b981' : dauDelta.dir === 'down' ? '#ef4444' : '#6b7280'};margin-top:4px;">
+             ${dauDelta.dir === 'up' ? '↑' : dauDelta.dir === 'down' ? '↓' : '→'} ${dauDelta.pct}% vs yesterday (${num(dauYest)} DAU)
+           </div>`
+        : `<div style="font-size:13px;color:#6b7280;margin-top:4px;">first day of data</div>`}
+    </div>
+    <!-- WAU / MAU pills -->
+    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:20px;text-align:center;">
+      <div>
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">WAU</div>
+        <div style="font-size:20px;font-weight:700;color:#d1fae5;">${num(wau)}</div>
+      </div>
+      <div style="width:1px;background:#1c2e22;"></div>
+      <div>
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">MAU</div>
+        <div style="font-size:20px;font-weight:700;color:#d1fae5;">${num(mau)}</div>
+      </div>
+      ${mau > 0 ? `
+      <div style="width:1px;background:#1c2e22;"></div>
+      <div>
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">DAU/MAU</div>
+        <div style="font-size:20px;font-weight:700;color:#d1fae5;">${((dauToday / mau) * 100).toFixed(0)}%</div>
+      </div>` : ''}
+    </div>
+    <!-- 7-day sparkline -->
+    <div>
+      <div style="font-size:10px;color:#4b5563;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;text-align:center;">7-day trend</div>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr style="vertical-align:bottom;height:60px;">${sparkHtml}</tr>
+      </table>
+    </div>
   </div>
 
   <!-- ── Traffic ── -->
@@ -335,6 +451,7 @@ function buildHtml(metrics) {
       ${tableRow('Searches performed', searches.today, searches.yesterday)}
       ${tableRow('Items deleted', deletes.today, deletes.yesterday)}
       ${tableRow('History cleared', clears.today, clears.yesterday, true)}
+      ${tableRow('Manual Cmd+C after Pluks', manualCopies.today, manualCopies.yesterday, true)}
     </tbody>
   </table>
 
@@ -347,6 +464,26 @@ function buildHtml(metrics) {
       ${card('Errors', totalErrors, delta(totalErrors, totalErrorsYest), true)}
     </tr>
   </table>
+
+  <!-- Error breakdown -->
+  ${totalErrors > 0 ? `
+  <div style="margin-top:10px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+      <thead>
+        <tr style="border-bottom:1px solid #222;">
+          <th style="padding:8px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Error Type</th>
+          <th style="padding:8px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+          <th style="padding:8px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+          <th style="padding:8px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRow('JS uncaught', jsErrors.today, jsErrors.yesterday, true)}
+        ${tableRow('Tauri invoke failed', tauriErrs.today, tauriErrs.yesterday, true)}
+        ${tableRow('Rust panic', rustPanics.today, rustPanics.yesterday, true)}
+      </tbody>
+    </table>
+  </div>` : ''}
 
   <!-- Smart paste breakdown -->
   ${smartPaste.length > 0 ? `
@@ -363,14 +500,24 @@ function buildHtml(metrics) {
     </table>
   </div>` : ''}
 
-  <!-- Capture fail rate -->
+  <!-- Capture success rate -->
   ${(selections.today + capFails.today) > 0 ? `
-  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;display:flex;align-items:center;">
-    <span style="font-size:13px;color:#9ca3af;">Capture success rate today:&nbsp;</span>
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;">
+    <span style="font-size:13px;color:#9ca3af;">Capture success rate:&nbsp;</span>
     <span style="font-size:14px;font-weight:700;color:${((selections.today / (selections.today + capFails.today)) * 100) >= 95 ? '#10b981' : '#f59e0b'};">
       ${((selections.today / (selections.today + capFails.today)) * 100).toFixed(1)}%
     </span>
-    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed)</span>
+    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed today)</span>
+  </div>` : ''}
+
+  <!-- ── Activation funnel ── -->
+  ${(obStarted + obCompleted + activated) > 0 ? `
+  ${sectionHeader('🎯 Activation (last 7 days)')}
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:16px 20px;">
+    ${funnelStep('Onboarding started', obStarted, obStarted)}
+    ${funnelStep('Onboarding completed', obCompleted, obStarted)}
+    ${funnelStep('Activation completed', activated, obStarted)}
+    ${funnelConv !== null ? `<div style="font-size:12px;color:#6b7280;text-align:right;margin-top:4px;">Install → Activated: <strong style="color:#6ee7b7;">${funnelConv}%</strong></div>` : ''}
   </div>` : ''}
 
   <!-- ── Platforms ── -->
