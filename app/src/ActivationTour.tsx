@@ -38,7 +38,7 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
   },
   "select-2": {
     title: "Stack another clip",
-    body: "Each new selection lands on top of your history. The last 100 stay around.",
+    body: "Each new selection lands on top of your history. The last 200 stay around.",
     success: "Two clips banked. You're getting it.",
     nextLabel: "Next →",
   },
@@ -50,7 +50,7 @@ const COPY: Record<StepKind, { title: string; body: string; success: string; nex
   },
   shortcut: {
     title: `Open your stash with ${SHORTCUT_HINT}`,
-    body: "Anywhere on your Mac. Search, click, paste — your last 100 clips, one shortcut away. Try it now.",
+    body: "Anywhere on your Mac. Search, click, paste — your last 200 clips, one shortcut away. Try it now.",
     success: "Welcome to Pluks.",
     nextLabel: "Get started →",
   },

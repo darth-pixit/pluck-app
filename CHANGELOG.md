@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Clipboard history now keeps your last 200 clips, up from 100, in both the
+  desktop app and the browser extension.
+
 ### Added
 - Clipboard now captures **every** copy, not just the select-to-copy gesture. A
   background clipboard watcher records anything that reaches the system

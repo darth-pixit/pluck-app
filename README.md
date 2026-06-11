@@ -11,7 +11,7 @@ Website: [pluks.app](https://pluks.app)
 | Path | What's in it |
 | --- | --- |
 | [`app/`](./app) | Desktop app — Tauri 2 + React 19 + TypeScript + Vite. Includes the system-tray history panel, preferences, activation tour, and updater. |
-| [`extension/`](./extension) | Browser extension (Manifest V3, Chrome/Firefox). Content script that auto-copies selected text, with a searchable 100-item history popup. |
+| [`extension/`](./extension) | Browser extension (Manifest V3, Chrome/Firefox). Content script that auto-copies selected text, with a searchable 200-item history popup. |
 | [`website/`](./website) | Marketing site served at [pluks.app](https://pluks.app). Static HTML/CSS/JS with an interactive demo. |
 | [`scripts/`](./scripts) | Release signing setup, analytics digest, and lead-handling helpers. |
 | [`tests/`](./tests) | Manual release regression test plan. |
@@ -20,7 +20,7 @@ Website: [pluks.app](https://pluks.app)
 ## Features
 
 - **Auto-copy on selection** — highlight text anywhere and it's on your clipboard.
-- **Searchable history** — last 100 clips, kept locally.
+- **Searchable history** — last 200 clips, kept locally.
 - **Local-first** — clipboard data never leaves your device.
 - **Anonymous, opt-out telemetry** — usage stats help us improve; turn it off in the popup or preferences.
 - **Cross-platform** — macOS, Windows, Linux, plus Chrome- and Firefox-based browsers.
