@@ -13,6 +13,19 @@ First CI-validated Windows build, shipped as **Beta**. Supersedes v0.6.0's
 Windows installer, which was published before the fixes below and carries the
 capture stall and lethal-logging bugs on Windows.
 
+### Fixed
+- **Long-press paste now pastes what you just copied — even right after a
+  manual Ctrl+C / Cmd+C.** v0.6.0's clipboard watcher records manual copies on
+  a half-second tick, but long-press fires after a 350 ms hold and pasted the
+  most-recent *history* row. Copying and immediately holding could therefore
+  paste the previous clip instead — and worse, overwrite the clipboard with it,
+  so the fresh copy never reached history and was lost. Long-press now checks
+  the clipboard first: a copy the watcher hasn't recorded yet is banked into
+  history and pasted as-is, without touching the clipboard. This also means
+  long-press works on a fresh copy even when history is still empty.
+  Concealed content (password managers) is still never read; those holds fall
+  back to the most-recent history clip as before.
+
 ### Added (Windows launch readiness)
 - **Windows runtime validation in CI** (`.github/workflows/windows-smoke.yml`):
   every run builds the real MSI, installs it silently on a `windows-latest`
