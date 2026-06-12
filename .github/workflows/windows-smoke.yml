@@ -132,12 +132,24 @@ jobs:
 
       - name: Locate installed exe
         run: |
-          $exe = "C:\Program Files\Pluks\Pluks.exe"
-          if (-not (Test-Path $exe)) {
-            Write-Host "Default path missing - searching"
+          # productName is "Pluks" (install dir) but the binary keeps the
+          # crate name "pluck" — Tauri 2 does not rename it. Check both.
+          $exe = @(
+            "C:\Program Files\Pluks\pluck.exe",
+            "C:\Program Files\Pluks\Pluks.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            Write-Host "Known paths missing - searching"
             $hit = Get-ChildItem "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA" `
-                     -Recurse -Filter Pluks.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $hit) { throw "Pluks.exe not found anywhere after install" }
+                     -Recurse -Include pluck.exe,Pluks.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $hit) {
+              Write-Host "--- msi-install.log (tail) ---"
+              Get-Content msi-install.log -Tail 80 -ErrorAction SilentlyContinue
+              Write-Host "--- registered products matching plu ---"
+              Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -match 'plu' } | Format-List DisplayName,InstallLocation,DisplayVersion
+              throw "pluck.exe / Pluks.exe not found anywhere after install"
+            }
             $exe = $hit.FullName
           }
           Write-Host "Found $exe"
