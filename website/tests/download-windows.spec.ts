@@ -1,5 +1,4 @@
-import { expect, test } from "@playwright/test";
-import { routeRelease, stubExternal } from "./helpers";
+import { expect, routeRelease, stubExternal, test } from "./helpers";
 
 // The Windows download card ships labeled Beta: the build is CI-validated
 // (installer, launch, clipboard capture — .github/workflows/windows-smoke.yml)

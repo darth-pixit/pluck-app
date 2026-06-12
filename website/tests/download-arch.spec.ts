@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers";
 
 // Regression guard for the Apple Silicon download bug: navigator.userAgent
 // reports "Intel" on every Mac, so the resolver must rely on the real GPU and
