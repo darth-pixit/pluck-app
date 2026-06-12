@@ -1054,7 +1054,9 @@ kbd {
 .platform-card .btn-download {
   background: var(--accent);
   color: #fff;
-  padding: 10px 20px;
+  /* The button is width:100%, so horizontal padding only steals room from
+     the label — keep it small so "↓ Download for Windows" fits one line. */
+  padding: 10px 8px;
   border-radius: 8px;
   font-weight: 600;
   font-size: 13px;
@@ -1062,7 +1064,9 @@ kbd {
   width: 100%;
   text-align: center;
   transition: background .15s, transform .1s;
-  margin-top: 4px;
+  /* Push to the card's bottom edge so buttons align across cards even when
+     one card's copy runs longer (the Windows beta blurb vs. the Mac one). */
+  margin-top: auto;
   display: block;
 }
 .platform-card .btn-download:hover { background: var(--accent-2); transform: translateY(-1px); text-decoration: none; }
