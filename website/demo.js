@@ -231,7 +231,6 @@
       const btn = card.querySelector(".btn-download");
       if (btn) {
         btn.textContent = "\u2193 Download for " + (cardId === "card-mac" ? "macOS" : cardId === "card-win" ? "Windows" : "Linux");
-        btn.style.fontSize = "14px";
       }
     }
 
