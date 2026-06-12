@@ -855,6 +855,10 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // One reused arboard handle, like the copy processor.
         let mut clip: Option<Clipboard> = Clipboard::new().ok();
         let mut last_token = clipboard_change_token();
+        // Dedupe for the skip-reason diagnostic below: transient skip reasons
+        // (disabled / panel_visible) don't consume the change token, so they
+        // re-fire every tick — log only the transitions.
+        let mut last_skip_reason: Option<&'static str> = None;
 
         loop {
             thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
@@ -901,8 +905,18 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                         let _ = app_handle.emit(EVT_HISTORY_ADDED, &item);
                     }
                     last_token = token;
+                    last_skip_reason = None;
                 }
                 PollOutcome::Skip(reason) => {
+                    // Log skip-state transitions (not every tick — transient
+                    // reasons re-fire until the block clears). This is the
+                    // only visibility into why a copy never reached history;
+                    // the Windows smoke run that caught the panel_visible
+                    // startup stall was undiagnosable without it.
+                    if last_skip_reason != Some(reason) {
+                        eprintln!("[pluks] clipboard poll skip: {reason}");
+                        last_skip_reason = Some(reason);
+                    }
                     // Consume the token only for content-tied reasons so we
                     // don't re-inspect the same clipboard every tick. For
                     // transient external blocks (auto-copy disabled, panel
@@ -1245,11 +1259,24 @@ pub fn run() {
             // the change and the panel flips itself to the main view.
             //
             // When everything is already granted we leave the window hidden
-            // — that's the intended invisible-launch default.
+            // — that's the intended invisible-launch default. The else branch
+            // *enforces* hidden rather than assuming it: on Windows the
+            // `visible: false` + `focus: true` combination in tauri.conf.json
+            // can leave the freshly created window showing, which both puts a
+            // stray panel on screen and permanently stalls the clipboard
+            // poller (`decide_poll` skips every tick with "panel_visible").
+            // Hiding an already-hidden window is a no-op, so this is safe on
+            // macOS/Linux too.
             if !ax_is_trusted() || !input_monitoring_granted() {
                 if let Some(win) = app.get_webview_window(WIN_HISTORY) {
                     show_history_window(&win, false);
                 }
+            } else if let Some(win) = app.get_webview_window(WIN_HISTORY) {
+                eprintln!(
+                    "[pluks] history window visible at startup: {:?} (forcing hidden)",
+                    win.is_visible()
+                );
+                let _ = win.hide();
             }
 
             Ok(())

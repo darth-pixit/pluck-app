@@ -212,6 +212,24 @@ jobs:
         run: |
           if ($env:PLUKS_PID) { Stop-Process -Id $env:PLUKS_PID -Force -ErrorAction SilentlyContinue }
 
+      # The artifact has everything, but failures must also be readable
+      # straight from the job log (the artifact needs a browser to fetch).
+      - name: Print diagnostics into job log
+        if: always()
+        run: |
+          Write-Host "=== app-stderr.log ==="
+          Get-Content app-stderr.log -Tail 60 -ErrorAction SilentlyContinue
+          Write-Host "=== app-stdout.log ==="
+          Get-Content app-stdout.log -Tail 20 -ErrorAction SilentlyContinue
+          Write-Host "=== pluks-panic.log ==="
+          Get-Content "$env:TEMP\pluks-panic.log" -ErrorAction SilentlyContinue
+          Write-Host "=== history table ==="
+          $db = Join-Path $env:APPDATA "app.pluks.desktop\pluck.db"
+          if (Test-Path $db) {
+            $env:PLUKS_DB = $db
+            python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); [print(r) for r in con.execute('SELECT id, substr(content,1,60), copied_at FROM history')]"
+          } else { Write-Host "(no pluck.db)" }
+
       - name: Collect diagnostics
         if: always()
         run: |
