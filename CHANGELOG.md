@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-06-12
+
 ### Fixed
 - Desktop app: successful captures were never reported to analytics — only the
   suppression path (`selection_capture_failed`) was wired, so the app showed
@@ -46,6 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mailto link for anyone who'd rather email straight away). Submissions emit
   anonymous, content-free analytics (length bucket + whether a reply email was
   given); the message text itself is never transmitted to PostHog.
+- `LICENSE` file with the MIT text at the repo root. The site and README
+  already said "MIT licensed", but without the file GitHub reported
+  `license: None`; the license is now machine-detectable.
+- Website: Open Graph / Twitter card meta tags on every page plus a branded
+  1200×630 social card (`og-card.png`) with a "Download Now" CTA, so links
+  shared on X/LinkedIn/Discord/Slack render a rich preview instead of a bare
+  link.
+- README: demo GIF, centered one-line pitch, and per-OS download badges at the
+  top; `extension/` added to the repository layout table; license section now
+  links to the LICENSE file.
 
 ## [v0.5.1] - 2026-06-11
 
