@@ -156,6 +156,8 @@ jobs:
           "PLUKS_EXE=$exe" >> $env:GITHUB_ENV
 
       - name: Launch and assert alive after 30s
+        env:
+          PLUKS_POLL_DEBUG: "1"
         run: |
           $proc = Start-Process $env:PLUKS_EXE -PassThru `
                     -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log
@@ -174,11 +176,17 @@ jobs:
       # if the runner session can't install low-level input hooks.
       - name: Capture pipeline - clipboard write lands in history DB
         run: |
+          # pwsh-side view of the clipboard sequence counter: if it advances
+          # here but the app's poller never sees a change (its heartbeat log),
+          # the two processes disagree about the window station.
+          Add-Type -Namespace W -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();'
           $marker = "pluks-ci-smoke-$(Get-Random)"
           $db = Join-Path $env:APPDATA "app.pluks.desktop\pluck.db"
           $env:PLUKS_DB = $db
           $env:PLUKS_MARKER = $marker
+          Write-Host "clipboard seq before write: $([W.U]::GetClipboardSequenceNumber())"
           Set-Clipboard -Value $marker
+          Write-Host "clipboard seq after write: $([W.U]::GetClipboardSequenceNumber())"
           Write-Host "Wrote marker '$marker', polling $db"
           $found = $false
           foreach ($i in 1..40) {            # poller ticks ~500ms; 20s budget

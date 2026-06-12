@@ -859,15 +859,32 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // (disabled / panel_visible) don't consume the change token, so they
         // re-fire every tick — log only the transitions.
         let mut last_skip_reason: Option<&'static str> = None;
+        // Set PLUKS_POLL_DEBUG=1 (the windows-smoke workflow does) for a
+        // per-stage trace of each tick. The "poller online" line is
+        // unconditional: it's one line per app start and it's the proof that
+        // this thread exists and what change token it baselined — without it
+        // a silent capture stall is indistinguishable from a dead thread.
+        let debug = std::env::var("PLUKS_POLL_DEBUG").is_ok();
+        eprintln!("[pluks] clipboard poller online, initial token {last_token:?}");
+        let mut tick: u64 = 0;
 
         loop {
             thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
+            tick += 1;
 
             // Cheap change gate: when the platform exposes a sequence number
             // and it hasn't advanced, nothing was copied — skip the expensive
             // type inspection and text read entirely. Platforms without a token
             // (Linux) report `None` and always fall through to a content check.
             let token = clipboard_change_token();
+            if debug && tick % 10 == 0 {
+                // Heartbeat (5s cadence): proves the loop is alive and shows
+                // the raw token even when the gate below never opens — the
+                // frozen-token failure mode (e.g. GetClipboardSequenceNumber
+                // returning 0 without window-station access) is invisible to
+                // every other log line.
+                eprintln!("[pluks] poll heartbeat tick={tick} token={token:?} last={last_token:?}");
+            }
             let changed = match (token, last_token) {
                 (Some(t), Some(lt)) => t != lt,
                 _ => true,
@@ -875,20 +892,33 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             if !changed {
                 continue;
             }
+            if debug {
+                eprintln!("[pluks] poll: token changed {last_token:?} -> {token:?}");
+            }
 
             // Privacy gate FIRST: if the clipboard is flagged concealed we never
             // read the text, so a copied password never enters a String, the DB,
             // or the live panel.
             let concealed = clipboard_is_concealed();
+            if debug {
+                eprintln!("[pluks] poll: concealed={concealed}");
+            }
             let text = if concealed {
                 None
             } else {
                 read_clipboard(&mut clip)
             };
+            if debug {
+                eprintln!("[pluks] poll: text_len={:?}", text.as_ref().map(|t| t.len()));
+            }
+            let visible = panel_visible(&app_handle);
+            if debug {
+                eprintln!("[pluks] poll: panel_visible={visible}");
+            }
 
             let outcome = decide_poll(
                 state.watcher_enabled(),
-                panel_visible(&app_handle),
+                visible,
                 concealed,
                 text,
                 state.last_recorded_clip().as_deref(),
