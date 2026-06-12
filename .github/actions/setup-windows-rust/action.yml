@@ -1,0 +1,36 @@
+name: Setup Rust on Windows (image workaround)
+description: >
+  Bootstrap a working Rust toolchain on windows-latest runners.
+
+  Belt-and-suspenders for the current windows-latest runner image:
+  `dtolnay/rust-toolchain@stable`'s own `rustup default stable` step has been
+  intermittently no-op'ing on Windows AND, worse, the runner's pre-installed
+  `cargo.exe` has been observed to BE `rustup-init.exe` itself rather than the
+  rustup shim — so any `cargo <subcommand>` invocation hits rustup-init's
+  argparse and dies with "unexpected argument 'check'". `rustup default` alone
+  can't fix that, because there is no real cargo shim on PATH to delegate to.
+
+  Bootstrap rustup from scratch into `~/.cargo/bin`, then prepend that to
+  GITHUB_PATH so every subsequent step (including tauri-action's internal
+  `cargo build`) resolves to the freshly installed shim instead of whatever
+  broken stub came with the image. Idempotent: if the image's toolchain
+  happens to be fine, this just reinstalls over the same files. `--quiet -y`
+  skips the interactive confirmations.
+
+  This is the single source of truth — it used to be copy-pasted across
+  tests.yml (twice), windows-smoke.yml, and release.yml, and the copies had
+  already drifted.
+runs:
+  using: composite
+  steps:
+    - name: Bootstrap Rust toolchain
+      shell: pwsh
+      run: |
+        $rustupInit = "$env:TEMP\rustup-init.exe"
+        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
+        & $rustupInit --default-toolchain stable --profile minimal -y --quiet
+        if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with $LASTEXITCODE" }
+        "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
+        & "$env:USERPROFILE\.cargo\bin\rustc.exe" --version
+        & "$env:USERPROFILE\.cargo\bin\rustup.exe" show active-toolchain

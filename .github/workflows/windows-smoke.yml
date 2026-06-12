@@ -76,21 +76,10 @@ jobs:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: app/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      # The composite action installs a full working toolchain on the broken
+      # windows-latest image — no separate dtolnay step needed here.
+      - uses: ./.github/actions/setup-windows-rust
         if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
-      # See the long comment in release.yml. Same workaround: bootstrap
-      # rustup from scratch on Windows, then prepend ~/.cargo/bin to
-      # GITHUB_PATH so subsequent `cargo` calls hit the real shim
-      # instead of the runner image's broken rustup-init-as-cargo stub.
-      - name: Bootstrap Rust toolchain (Windows image workaround)
-        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
-        run: |
-          $rustupInit = "$env:TEMP\rustup-init.exe"
-          Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
-          & $rustupInit --default-toolchain stable --profile minimal -y --quiet
-          if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with $LASTEXITCODE" }
-          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
       - uses: Swatinem/rust-cache@v2
         if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
         with:
@@ -224,13 +213,13 @@ jobs:
           foreach ($i in 1..40) {            # poller ticks ~500ms; ~25s wall incl. python spawns
             Start-Sleep -Milliseconds 500
             if (Test-Path $db) {
-              $hit = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER'] in c))" | Select-Object -Last 1
+              $hit = python .github/scripts/history_query.py count PLUKS_MARKER | Select-Object -Last 1
               if ([int]$hit -gt 0) { $found = $true; break }
             }
           }
           if (-not $found) {
             if (Test-Path $db) {
-              python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); [print(repr(r)) for r in con.execute('SELECT id, substr(content,1,80), copied_at FROM history')]"
+              python .github/scripts/history_query.py dump
             } else { Write-Host "history DB never appeared" }
             throw "marker never appeared in pluck.db history"
           }
@@ -244,7 +233,7 @@ jobs:
           $found2 = $false
           foreach ($j in 1..20) {            # 10s budget
             Start-Sleep -Milliseconds 500
-            $hit2 = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER2'] in c))" | Select-Object -Last 1
+            $hit2 = python .github/scripts/history_query.py count PLUKS_MARKER2 | Select-Object -Last 1
             if ([int]$hit2 -gt 0) { $found2 = $true; break }
           }
           if (-not $found2) { throw "second clip never captured - poller died after first capture?" }
@@ -258,24 +247,9 @@ jobs:
         run: |
           if ($env:PLUKS_PID) { Stop-Process -Id $env:PLUKS_PID -Force -ErrorAction SilentlyContinue }
 
-      # The artifact has everything, but failures must also be readable
-      # straight from the job log (the artifact needs a browser to fetch).
-      - name: Print diagnostics into job log
-        if: always()
-        run: |
-          Write-Host "=== app-stderr.log ==="
-          Get-Content app-stderr.log -Tail 60 -ErrorAction SilentlyContinue
-          Write-Host "=== app-stdout.log ==="
-          Get-Content app-stdout.log -Tail 20 -ErrorAction SilentlyContinue
-          Write-Host "=== pluks-panic.log ==="
-          Get-Content "$env:TEMP\pluks-panic.log" -ErrorAction SilentlyContinue
-          Write-Host "=== history table ==="
-          $db = Join-Path $env:APPDATA "app.pluks.desktop\pluck.db"
-          if (Test-Path $db) {
-            $env:PLUKS_DB = $db
-            python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); [print(r) for r in con.execute('SELECT id, substr(content,1,60), copied_at FROM history')]"
-          } else { Write-Host "(no pluck.db)" }
-
+      # Collect FIRST, then print FROM diag\ — one file list, so the artifact
+      # and the job log can never drift apart (failures must be readable
+      # straight from the log; the artifact needs a browser to fetch).
       - name: Collect diagnostics
         if: always()
         run: |
@@ -288,6 +262,21 @@ jobs:
             Where-Object { $_.ProviderName -in 'Application Error','Windows Error Reporting','.NET Runtime' -or $_.Message -match 'Pluks' } |
             Format-List TimeCreated,ProviderName,Id,Message | Out-File diag\eventlog.txt
           Get-Process | Sort-Object ProcessName | Format-Table -AutoSize | Out-File diag\processes.txt
+
+      - name: Print diagnostics into job log
+        if: always()
+        run: |
+          Write-Host "=== app-stderr.log ==="
+          Get-Content diag\app-stderr.log -Tail 60 -ErrorAction SilentlyContinue
+          Write-Host "=== app-stdout.log ==="
+          Get-Content diag\app-stdout.log -Tail 20 -ErrorAction SilentlyContinue
+          Write-Host "=== pluks-panic.log ==="
+          Get-Content diag\pluks-panic.log -ErrorAction SilentlyContinue
+          Write-Host "=== history table ==="
+          if (Test-Path diag\pluck.db) {
+            $env:PLUKS_DB = "diag\pluck.db"
+            python .github/scripts/history_query.py dump
+          } else { Write-Host "(no pluck.db)" }
 
       - name: Upload diagnostics artifact
         if: always()

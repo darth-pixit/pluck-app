@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-06-12
+
+Hardening follow-up to the launch release. The first three fixes were merged
+~10 minutes after v0.7.0 was cut and missed that train.
+
+### Fixed
+- **Privacy: the clipboard-read retry could capture a concealed secret.**
+  v0.7.0's poller retries a failed clipboard read after 50 ms — but the
+  likeliest reason a read fails is that another process is mid-write, quite
+  possibly a password manager writing a concealed clip. The retry now re-runs
+  the concealed-content check before the second read, and is skipped entirely
+  on platforms without a clipboard change token (on Linux it was adding a
+  50 ms sleep and a doubled read to every tick a screenshot sat on the
+  clipboard).
+- **A transient settings-read failure can no longer corrupt your settings.**
+  If reading settings failed at startup, the in-memory fallback (random id,
+  everything opted out) could later be written to disk verbatim by toggling
+  any preference — permanently rotating the anonymous analytics id and
+  overwriting real opt-out choices. Preference changes now recover the real
+  on-disk record before persisting, and stay in-memory-only if it remains
+  unreachable. The fallback keeps analytics OFF (fail-closed).
+- A clip whose history write failed (e.g. the database was briefly locked) is
+  now stashed and retried until it lands, instead of being silently dropped.
+
+### Added
+- **Single-instance guard.** Launching Pluks while it's already running no
+  longer spawns a second copy (two capture pipelines double-recorded every
+  clip into the same history). The second launch surfaces the history panel
+  of the running instance instead.
+- **Tray creation retries.** If the tray icon can't register — typically
+  autostart winning the race against explorer.exe at login — Pluks now
+  retries with backoff (5s…80s) instead of running invisibly forever with no
+  quit path.
+
+### Changed
+- CI: the Windows toolchain bootstrap is one composite action instead of four
+  drifting copies; the smoke harness's DB queries live in one script instead
+  of four inline one-liners; smoke diagnostics are collected once and printed
+  from the same set, so the job log and the artifact can't drift.
+- Website analytics: iPhone/iPad visitors are no longer counted as
+  "Mac OS X" (iOS UAs contain "like Mac OS X"; iPadOS 13+ ships a desktop
+  Macintosh UA), and Android is no longer counted as "Linux".
+
 ## [v0.7.0] - 2026-06-12
 
 First CI-validated Windows build, shipped as **Beta**. Supersedes v0.6.0's

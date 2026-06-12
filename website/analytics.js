@@ -106,11 +106,15 @@
 
   function detectOs() {
     var ua = navigator.userAgent || "";
+    // iOS first: iPhone/iPad UAs contain "like Mac OS X", and iPadOS 13+
+    // Safari ships a desktop "Macintosh" UA whose only tell is multi-touch —
+    // same detection demo.js uses for the download cards.
+    if (/(iPhone|iPad|iPod)/.test(ua)) return "iOS";
+    if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return "iOS";
     if (/Mac OS X/.test(ua))   return "Mac OS X";
     if (/Windows/.test(ua))    return "Windows";
-    if (/Linux/.test(ua))      return "Linux";
     if (/Android/.test(ua))    return "Android";
-    if (/(iPhone|iPad)/.test(ua)) return "iOS";
+    if (/Linux/.test(ua))      return "Linux";
     return "Unknown";
   }
 
