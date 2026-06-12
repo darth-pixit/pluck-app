@@ -5,11 +5,13 @@ All notable changes to Pluks are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [v0.7.0] - 2026-06-12
 
-First CI-validated Windows build, shipped as **Beta**. Folds in the unreleased
-v0.5.1 (macOS nudge fix) — v0.5.1 was tagged in this changelog but never
-published as binaries.
+First CI-validated Windows build, shipped as **Beta**. Supersedes v0.6.0's
+Windows installer, which was published before the fixes below and carries the
+capture stall and lethal-logging bugs on Windows.
 
 ### Added (Windows launch readiness)
 - **Windows runtime validation in CI** (`.github/workflows/windows-smoke.yml`):
@@ -50,6 +52,8 @@ published as binaries.
   enables a per-tick trace (heartbeat + stage-by-stage), so a silent capture
   stall is diagnosable from stderr alone.
 
+## [v0.6.0] - 2026-06-12
+
 ### Fixed
 - Desktop app: successful captures were never reported to analytics — only the
   suppression path (`selection_capture_failed`) was wired, so the app showed
@@ -89,10 +93,20 @@ published as binaries.
   mailto link for anyone who'd rather email straight away). Submissions emit
   anonymous, content-free analytics (length bucket + whether a reply email was
   given); the message text itself is never transmitted to PostHog.
+- `LICENSE` file with the MIT text at the repo root. The site and README
+  already said "MIT licensed", but without the file GitHub reported
+  `license: None`; the license is now machine-detectable.
+- Website: Open Graph / Twitter card meta tags on every page plus a branded
+  1200×630 social card (`og-card.png`) with a "Download Now" CTA, so links
+  shared on X/LinkedIn/Discord/Slack render a rich preview instead of a bare
+  link.
+- README: demo GIF, centered one-line pitch, and per-OS download badges at the
+  top; `extension/` added to the repository layout table; license section now
+  links to the LICENSE file.
 
 ## [v0.5.1] - 2026-06-11
 
-_Never shipped standalone — folded into v0.7.0._
+_Never shipped standalone — first published as part of v0.6.0._
 
 ### Fixed
 - macOS: nudges never appeared — not the copy/paste affirmations, the corrective
