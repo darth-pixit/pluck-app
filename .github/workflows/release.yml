@@ -380,3 +380,14 @@ jobs:
               draft: false,
               make_latest: true,
             });
+
+  # Install/launch/capture the JUST-PUBLISHED Windows MSI on a real runner.
+  # This is what backs the website/README claim that every release is
+  # install- and run-tested on Windows. Non-blocking by nature (the release
+  # is already out), but a red here is the earliest possible signal that the
+  # shipped installer is broken.
+  windows-smoke:
+    needs: publish-release
+    uses: ./.github/workflows/windows-smoke.yml
+    with:
+      msi_source: latest-release

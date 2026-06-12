@@ -202,7 +202,7 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
         most_recent,
     ) {
         FireDecision::Skip(reason) => {
-            eprintln!("[pluks] try_fire: suppressed {}", reason);
+            crate::elog!("[pluks] try_fire: suppressed {}", reason);
             let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": reason }));
             FsmState::Disarmed
         }
@@ -220,7 +220,7 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
             // the clipboard, and the poller must not re-record that as a fresh
             // external copy.
             if !state.write_clipboard_remembered(&content) {
-                eprintln!("[pluks] try_fire: clipboard write failed");
+                crate::elog!("[pluks] try_fire: clipboard write failed");
                 let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": "clipboard_failed" }));
                 state.set_target_pid(None);
                 return FsmState::Disarmed;

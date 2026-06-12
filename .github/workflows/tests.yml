@@ -59,6 +59,40 @@ jobs:
             libayatana-appindicator3-dev libxdo-dev
       - run: cargo test --lib
 
+  # ── Rust unit tests on Windows ───────────────────────────────────────────────
+  # The Win32 FFI paths (clipboard sequence numbers, concealment formats,
+  # cursor/foreground queries) can only *execute* on Windows — the ubuntu job
+  # merely compiles them out. This is the first place that code actually runs.
+  app-rust-windows:
+    name: App Rust (cargo test, windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # See the long comment in release.yml. Same workaround: bootstrap
+      # rustup from scratch on Windows, then prepend ~/.cargo/bin to
+      # GITHUB_PATH so subsequent `cargo` calls hit the real shim
+      # instead of the runner image's broken rustup-init-as-cargo stub.
+      - name: Bootstrap Rust toolchain (Windows image workaround)
+        shell: pwsh
+        run: |
+          $rustupInit = "$env:TEMP\rustup-init.exe"
+          Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
+          & $rustupInit --default-toolchain stable --profile minimal -y --quiet
+          if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with $LASTEXITCODE" }
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
+          & "$env:USERPROFILE\.cargo\bin\rustc.exe" --version
+          & "$env:USERPROFILE\.cargo\bin\rustup.exe" show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - run: cargo test --lib
+
   # ── Tauri build smoke test (catches Rust compile regressions) ───────────────
   app-build-smoke:
     name: App build smoke (${{ matrix.os }})

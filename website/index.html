@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Pluks — Select text. It's already copied.</title>
-  <meta name="description" content="Pluks auto-copies any text you select — no keyboard shortcut needed. Free, tiny, open-source for macOS.">
+  <meta name="description" content="Pluks auto-copies any text you select — no keyboard shortcut needed. Free, tiny, open-source for macOS and Windows (beta).">
   <link rel="canonical" href="https://pluks.app/">
 
   <!-- Social cards -->
@@ -74,7 +74,7 @@
       </svg>
       Download free for Mac
     </a>
-    <p class="hero-meta">macOS 11+ · Apple Silicon &amp; Intel · MIT licensed</p>
+    <p class="hero-meta">macOS 11+ · Apple Silicon &amp; Intel · <a href="#download">Windows 10/11 (beta)</a> · MIT licensed</p>
   </div>
 </section>
 
@@ -193,8 +193,8 @@
           <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
         </svg>
       </div>
-      <h3>Built for Mac</h3>
-      <p>Universal binary for Apple Silicon and Intel. Lives in your menu bar, respects macOS conventions, and feels right at home.</p>
+      <h3>Native on Mac &amp; Windows</h3>
+      <p>One universal Mac binary for Apple Silicon and Intel, living in your menu bar. On Windows 10/11 (beta) it sits in the system tray — same select-to-copy, zero setup.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📖</div>
@@ -287,7 +287,7 @@
         </tr>
         <tr>
           <th scope="row">Platforms</th>
-          <td class="col-pluks"><span class="c-text">macOS</span></td>
+          <td class="col-pluks"><span class="c-text">macOS · Windows (beta)</span></td>
           <td><span class="c-text">macOS</span></td>
           <td><span class="c-text">macOS · iPhone · iPad</span></td>
           <td><span class="c-text">macOS · Windows · iOS</span></td>
@@ -347,7 +347,7 @@
     <li>Raycast's free plan keeps 3 months of clipboard history; longer retention needs Pro ($8/mo billed annually).</li>
     <li>Maccy is free from GitHub or Homebrew; the optional $9.99 Mac App Store copy is identical and supports the developer.</li>
     <li>Raycast deliberately excludes clipboard contents from its Pro cloud sync — settings sync, clips don't.</li>
-    <li>Via the macOS concealed-clipboard convention used by password managers.</li>
+    <li>Via the concealed-clipboard conventions password managers set — <code>org.nspasteboard.ConcealedType</code> on macOS, <code>ExcludeClipboardContentFromMonitorProcessing</code> on Windows.</li>
   </ol>
 
   <p class="compare-disclaimer">
@@ -358,17 +358,40 @@
 
 <!-- ─── DOWNLOAD ──────────────────────────────────────────────────────────── -->
 <!--
-  Multi-platform download section (Mac/Win/Linux cards + Homebrew/Choco/Snap
-  links) is intentionally hidden until the non-Mac builds have been validated
-  end-to-end. The CTAs above and in the nav drive the Mac DMG directly.
-
-  Don't remove the markup permanently — the per-platform card layout, the
-  dl-win / dl-linux IDs (referenced by analytics.js) and the latest-release
-  asset matching in the bottom <script> are all ready to switch back on as
-  soon as Windows + Linux are tested. The card-mac / card-win / card-linux
-  highlightPlatformCard() pass in demo.js already no-ops when these IDs are
-  absent, so no other JS needs to change.
+  The Linux card + package-manager links (Homebrew/Choco/Snap) stay hidden
+  until the Linux build gets the same automated install/launch/capture
+  validation the Windows build now has (.github/workflows/windows-smoke.yml).
+  The dl-linux ID (analytics.js) and the latest-release asset matching in the
+  bottom <script> are ready to switch back on when it does.
 -->
+<section class="download" id="download">
+  <h2 class="section-title">Download Pluks</h2>
+  <p class="download-sub">Free, tiny, open source. No account required.</p>
+  <div class="platform-cards">
+    <div class="platform-card" id="card-mac">
+      <div class="platform-icon">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+        </svg>
+      </div>
+      <h3>macOS</h3>
+      <p>macOS 11+. One universal app for Apple Silicon &amp; Intel.</p>
+      <a class="btn-download" id="dl-mac-card" data-dl-mac href="https://github.com/darth-pixit/pluck-app/releases/latest">Download .dmg</a>
+    </div>
+    <div class="platform-card" id="card-win">
+      <div class="platform-icon">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+        </svg>
+      </div>
+      <h3>Windows <span class="pill">Beta</span></h3>
+      <p>Windows 10/11, 64-bit. Every release is install- and run-tested on
+         Windows automatically, but it's newer than the Mac app — if you hit a
+         rough edge, the feedback button (bottom right) reaches us directly.</p>
+      <a class="btn-download" id="dl-win" data-dl-win href="https://github.com/darth-pixit/pluck-app/releases/latest">Download .msi</a>
+    </div>
+  </div>
+</section>
 
 <!-- ─── PRIVACY & TELEMETRY ──────────────────────────────────────────────── -->
 <section class="privacy-blurb" id="privacy-blurb">
@@ -378,7 +401,7 @@
     fix bugs and prioritize what to build next. Here's exactly what we do.
   </p>
   <ul class="privacy-bullets">
-    <li><strong>Password fields are skipped automatically.</strong> The desktop app checks macOS Accessibility before every capture — if focus is inside a secure text input (login, unlock prompt, password manager), Pluks never simulates a copy.</li>
+    <li><strong>Passwords stay out of history.</strong> On macOS the app checks Accessibility before every capture — if focus is inside a secure text input (login, unlock prompt, password manager), Pluks never simulates a copy. On both macOS and Windows, anything a password manager marks with the standard concealed-clipboard flags is never read or stored. (Windows secure-field detection is in the works — until then, the concealed-clipboard convention is the Windows safeguard.)</li>
     <li><strong>What we send:</strong> anonymous event counts (panel opens, history clicks, smart-paste use), error and crash stack traces, app/OS version, locale.</li>
     <li><strong>What we never send:</strong> the text you copy, the websites you visit, your name or email, anything that could identify you.</li>
     <li><strong>How to turn it off:</strong> desktop app → ⚙ Preferences → "Send anonymous usage stats". Website → respects Do Not Track.</li>
@@ -412,6 +435,10 @@
         line that touches these permissions lives in one file you can read:
         <a href="https://github.com/darth-pixit/pluck-app/blob/main/app/src-tauri/src/selection.rs"
            target="_blank" rel="noopener">app/src-tauri/src/selection.rs</a>.
+      </p>
+      <p>
+        On Windows there's no equivalent permission step — global input listening and
+        clipboard access work out of the box, so Pluks runs the moment it's installed.
       </p>
     </div>
   </details>

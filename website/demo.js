@@ -208,14 +208,23 @@
   (function highlightPlatformCard() {
     const ua = navigator.userAgent.toLowerCase();
     let cardId;
-    if (ua.includes("mac os x") || ua.includes("macintosh")) {
+    const isIosLike =
+      /iphone|ipad|ipod/.test(ua) ||
+      // iPadOS 13+ Safari defaults to a DESKTOP UA ("Macintosh; Intel Mac OS
+      // X") with no "ipad" token; multi-touch on a "Mac" is the standard tell.
+      (/macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    if (isIosLike) {
+      // No mobile build exists — recommending a .dmg to an iPhone/iPad is
+      // worse than highlighting nothing.
+      cardId = null;
+    } else if (ua.includes("mac os x") || ua.includes("macintosh")) {
       cardId = "card-mac";
     } else if (ua.includes("windows")) {
       cardId = "card-win";
     } else {
       cardId = "card-linux";
     }
-    const card = document.getElementById(cardId);
+    const card = cardId && document.getElementById(cardId);
     if (card) {
       card.style.borderColor = "rgba(252,76,2,.5)";
       card.style.boxShadow = "0 0 0 1px rgba(252,76,2,.15), 0 8px 32px rgba(252,76,2,.15)";
@@ -224,6 +233,24 @@
         btn.textContent = "\u2193 Download for " + (cardId === "card-mac" ? "macOS" : cardId === "card-win" ? "Windows" : "Linux");
         btn.style.fontSize = "14px";
       }
+    }
+
+    // Windows visitors also get the nav + hero CTAs retargeted at the MSI \u2014
+    // a Mac-labeled primary button is wrong for them. The data-attribute swap
+    // runs synchronously, before the async release fetch resolves, so the
+    // [data-dl-win] href pass in index.html picks these up too. The Mac
+    // card's own button (#dl-mac-card) is intentionally left alone.
+    function retargetToWindows(el, label) {
+      if (!el) return;
+      el.removeAttribute("data-dl-mac");
+      el.setAttribute("data-dl-win", "");
+      const icon = el.querySelector(".apple-icon");
+      if (icon) icon.remove();
+      el.textContent = label;
+    }
+    if (cardId === "card-win") {
+      retargetToWindows(document.getElementById("dl-mac"), "Download free for Windows (beta)");
+      retargetToWindows(document.querySelector("nav .nav-cta"), "Download for Windows");
     }
   })();
 })();

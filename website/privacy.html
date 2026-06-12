@@ -84,12 +84,19 @@
   you select text. When a text selection is detected, it simulates a copy operation and
   saves the result to a local SQLite database stored in your application data folder.
   This database never leaves your computer.</p>
-  <p><strong>Password fields are skipped automatically.</strong> Before every
-  capture, Pluks asks macOS Accessibility for the role of the focused element.
+  <p><strong>Passwords stay out of history.</strong> On macOS, before every
+  capture, Pluks asks Accessibility for the role of the focused element.
   If it's <code>AXSecureTextField</code> — the role used by every standard
   password input on macOS, including Safari logins, the system unlock prompt,
   and password managers — Pluks does not simulate a copy, does not read the
-  clipboard, and stores nothing in history.</p>
+  clipboard, and stores nothing in history. On both macOS and Windows, content
+  that a password manager flags with the standard concealed-clipboard
+  conventions (<code>org.nspasteboard.ConcealedType</code>,
+  <code>ExcludeClipboardContentFromMonitorProcessing</code>,
+  <code>CanIncludeInClipboardHistory=0</code>) is never read or stored.
+  Equivalent focused-field detection for Windows (via UI&nbsp;Automation) is
+  planned; until it ships, the concealed-clipboard convention is the Windows
+  safeguard.</p>
 
   <h2>Analytics &amp; error reporting</h2>
   <p>Pluks uses two services to collect <strong>anonymous</strong>, opt-out telemetry:
@@ -101,7 +108,7 @@
   <h3 style="font-size:1rem;font-weight:600;margin:24px 0 8px;color:rgba(255,255,255,0.85);">What we send</h3>
   <ul>
     <li>Event counts: panel opens, history clicks, smart-paste use, search use, downloads.</li>
-    <li>Coarse properties: app version, macOS major version, locale, screen size.</li>
+    <li>Coarse properties: app version, OS and major version (e.g. macOS 14, Windows 11), locale, screen size.</li>
     <li>Bucketed selection length (e.g. <code>11-100</code>, <code>101-1000</code>) — never the value.</li>
     <li>Error type, stack trace, and a hash of the error message.</li>
   </ul>

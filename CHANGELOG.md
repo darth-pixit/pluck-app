@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-06-12
+
+First CI-validated Windows build, shipped as **Beta**. Supersedes v0.6.0's
+Windows installer, which was published before the fixes below and carries the
+capture stall and lethal-logging bugs on Windows.
+
+### Added (Windows launch readiness)
+- **Windows runtime validation in CI** (`.github/workflows/windows-smoke.yml`):
+  every run builds the real MSI, installs it silently on a `windows-latest`
+  runner, launches the installed binary, asserts it survives 30 s, and proves
+  the capture pipeline end-to-end — a clipboard write must land in `pluck.db`
+  history, twice. Diagnostics (app stderr, panic log, MSI verbose log, WER
+  dumps, event log) upload on every run. This is the first time the Windows
+  build was ever executed anywhere; the website's Beta label reflects exactly
+  what this harness does and doesn't prove.
+- **`cargo test` on Windows** (`app-rust-windows` job): the Win32 clipboard
+  primitives now actually execute in CI — sequence-number advance, the KeePass
+  `ExcludeClipboardContentFromMonitorProcessing` marker,
+  `CanIncludeInClipboardHistory` 0/1 (both branches), arboard roundtrip, and
+  tolerant cursor / foreground-PID contracts.
+- Website: download section restored with a Windows card labeled **Beta**
+  (honest copy, MSI auto-resolution, email-gate modal). Windows visitors get
+  the nav + hero CTAs retargeted at the MSI. Platform claims swept for honesty
+  across the site, privacy policy, FAQ, and README.
+
+### Fixed (found by the new Windows harness)
+- **Capture could die with the logger.** `eprintln!` panics when the stderr
+  write fails (e.g. stderr is a pipe whose reader went away — any launcher
+  that closes stderr can cause this). One failed diagnostic write took down
+  the clipboard poller, and the panic hook's own `eprintln!` then aborted the
+  whole app before writing `pluks-panic.log`. All diagnostics now go through
+  a best-effort `elog!` macro that can never panic, and the panic hook
+  persists its log file *before* printing.
+- **Tray failure no longer kills the app.** Tray registration
+  (`Shell_NotifyIcon` on Windows) can fail when no shell is available —
+  explorer.exe crashing/restarting, headless sessions. That error used to
+  abort setup and exit; capture and the global shortcut now survive it.
+- **History panel is forced hidden at startup** when permissions are granted.
+  The `visible: false` + `focus: true` window config could leave the panel
+  showing on Windows, which both put a stray window on screen and permanently
+  stalled the clipboard poller (it pauses while the panel is open).
+- Clipboard poller: skip-state transitions are logged, and `PLUKS_POLL_DEBUG=1`
+  enables a per-tick trace (heartbeat + stage-by-stage), so a silent capture
+  stall is diagnosable from stderr alone.
+
 ## [v0.6.0] - 2026-06-12
 
 ### Fixed
@@ -60,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   links to the LICENSE file.
 
 ## [v0.5.1] - 2026-06-11
+
+_Never shipped standalone — first published as part of v0.6.0._
 
 ### Fixed
 - macOS: nudges never appeared — not the copy/paste affirmations, the corrective

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://127.0.0.1:1/latest.json"]
+    }
+  },
+  "bundle": {
+    "targets": ["msi"],
+    "createUpdaterArtifacts": false
+  }
+}

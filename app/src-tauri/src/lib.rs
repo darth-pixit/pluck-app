@@ -1,3 +1,19 @@
+/// Best-effort stderr diagnostics. `eprintln!` PANICS when the stderr write
+/// fails — fatal when stderr is a pipe whose reader has gone away. The Windows
+/// smoke harness proved this the hard way: its launch step's pipe pump died
+/// with the parent shell, the next poller heartbeat write panicked, the panic
+/// hook's own eprintln panicked in turn, and the whole app aborted without a
+/// trace. Real users can reproduce the same with any launcher that closes
+/// stderr. Every diagnostic in this crate goes through here so logging can
+/// never take the app down.
+#[macro_export]
+macro_rules! elog {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr().lock(), $($arg)*);
+    }};
+}
+
 mod history;
 mod paste;
 mod selection;
@@ -337,22 +353,22 @@ fn show_in_nudge_window(
     log_tag: &str,
 ) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
-        eprintln!("[pluks] {}: WIN_NUDGE not found", log_tag);
+        crate::elog!("[pluks] {}: WIN_NUDGE not found", log_tag);
         return;
     };
     let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    eprintln!(
+    crate::elog!(
         "[pluks] {}: gen={} target=({:.1},{:.1}) size=({},{}) event={}",
         log_tag, my_gen, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT, event,
     );
     if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] {}: set_position failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: set_position failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
-        eprintln!("[pluks] {}: set_size failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: set_size failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.show() {
-        eprintln!("[pluks] {}: show() failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: show() failed: {:?}", log_tag, e);
     }
     // CRITICAL: Pluks is an LSUIElement/Accessory app, so it is almost never
     // the active app when a nudge fires (the user is typing in some other
@@ -366,7 +382,7 @@ fn show_in_nudge_window(
     // (paste-confirm), and listeners in the nudge webview itself also
     // receive broadcasts.
     if let Err(e) = app.emit(event, &payload) {
-        eprintln!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
+        crate::elog!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
     }
 
     let app_for_hide = app.clone();
@@ -855,15 +871,40 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // One reused arboard handle, like the copy processor.
         let mut clip: Option<Clipboard> = Clipboard::new().ok();
         let mut last_token = clipboard_change_token();
+        // Dedupe for the skip-reason diagnostic below: transient skip reasons
+        // (disabled / panel_visible) don't consume the change token, so they
+        // re-fire every tick — log only the transitions.
+        let mut last_skip_reason: Option<&'static str> = None;
+        // Set PLUKS_POLL_DEBUG=1 (the windows-smoke workflow does) for a
+        // per-stage trace of each tick. The "poller online" line is
+        // unconditional: it's one line per app start and it's the proof that
+        // this thread exists and what change token it baselined — without it
+        // a silent capture stall is indistinguishable from a dead thread.
+        // "0" and empty mean OFF — a bare `is_ok()` would treat an explicit
+        // disable as enable.
+        let debug = std::env::var("PLUKS_POLL_DEBUG")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false);
+        crate::elog!("[pluks] clipboard poller online, initial token {last_token:?}");
+        let mut tick: u64 = 0;
 
         loop {
             thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
+            tick += 1;
 
             // Cheap change gate: when the platform exposes a sequence number
             // and it hasn't advanced, nothing was copied — skip the expensive
             // type inspection and text read entirely. Platforms without a token
             // (Linux) report `None` and always fall through to a content check.
             let token = clipboard_change_token();
+            if debug && tick % 10 == 0 {
+                // Heartbeat (5s cadence): proves the loop is alive and shows
+                // the raw token even when the gate below never opens — the
+                // frozen-token failure mode (e.g. GetClipboardSequenceNumber
+                // returning 0 without window-station access) is invisible to
+                // every other log line.
+                crate::elog!("[pluks] poll heartbeat tick={tick} token={token:?} last={last_token:?}");
+            }
             let changed = match (token, last_token) {
                 (Some(t), Some(lt)) => t != lt,
                 _ => true,
@@ -871,38 +912,81 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             if !changed {
                 continue;
             }
+            if debug {
+                crate::elog!("[pluks] poll: token changed {last_token:?} -> {token:?}");
+            }
 
             // Privacy gate FIRST: if the clipboard is flagged concealed we never
             // read the text, so a copied password never enters a String, the DB,
             // or the live panel.
             let concealed = clipboard_is_concealed();
+            if debug {
+                crate::elog!("[pluks] poll: concealed={concealed}");
+            }
             let text = if concealed {
                 None
             } else {
-                read_clipboard(&mut clip)
+                // One bounded retry: `read_clipboard` flattens transient
+                // failures (another process briefly holding the clipboard
+                // open, delayed rendering) into the same `None` as a
+                // genuinely text-less clipboard, and a `None` outcome
+                // consumes the change token below — without the retry, one
+                // moment of contention permanently loses that copy.
+                read_clipboard(&mut clip).or_else(|| {
+                    thread::sleep(Duration::from_millis(50));
+                    read_clipboard(&mut clip)
+                })
             };
+            if debug {
+                crate::elog!("[pluks] poll: text_len={:?}", text.as_ref().map(|t| t.len()));
+            }
+            let visible = panel_visible(&app_handle);
+            if debug {
+                crate::elog!("[pluks] poll: panel_visible={visible}");
+            }
 
             let outcome = decide_poll(
                 state.watcher_enabled(),
-                panel_visible(&app_handle),
+                visible,
                 concealed,
                 text,
                 state.last_recorded_clip().as_deref(),
             );
 
             match outcome {
-                PollOutcome::Record(t) => {
-                    if let Ok(item) = state.db().insert(&t) {
+                PollOutcome::Record(t) => match state.db().insert(&t) {
+                    Ok(item) => {
                         state.remember_clip(&item.content);
                         // `history-added`, not `new-selection`: this updates the
                         // panel list but must NOT run the affirmation/nudge
                         // pipeline or inflate the select-to-copy adoption
                         // counters — a manual copy isn't a select-to-copy.
                         let _ = app_handle.emit(EVT_HISTORY_ADDED, &item);
+                        last_token = token;
+                        last_skip_reason = None;
                     }
-                    last_token = token;
-                }
+                    Err(e) => {
+                        // Leave the token unconsumed so the next tick retries
+                        // (SQLITE_BUSY from a concurrent reader, transient
+                        // IOERR are recoverable); dedupe the log line like a
+                        // skip reason so a persistent failure (disk full)
+                        // doesn't spam stderr twice a second.
+                        if last_skip_reason != Some("db_insert_failed") {
+                            crate::elog!("[pluks] history insert failed (will retry): {e}");
+                            last_skip_reason = Some("db_insert_failed");
+                        }
+                    }
+                },
                 PollOutcome::Skip(reason) => {
+                    // Log skip-state transitions (not every tick — transient
+                    // reasons re-fire until the block clears). This is the
+                    // only visibility into why a copy never reached history;
+                    // the Windows smoke run that caught the panel_visible
+                    // startup stall was undiagnosable without it.
+                    if last_skip_reason != Some(reason) {
+                        crate::elog!("[pluks] clipboard poll skip: {reason}");
+                        last_skip_reason = Some(reason);
+                    }
                     // Consume the token only for content-tied reasons so we
                     // don't re-inspect the same clipboard every tick. For
                     // transient external blocks (auto-copy disabled, panel
@@ -970,7 +1054,7 @@ pub fn run() {
     // build is actually running — important for the v0.4.5 diagnostic
     // build that's being shipped to disambiguate the Tahoe 26.2 overlay
     // visibility bug.
-    eprintln!(
+    crate::elog!(
         "[pluks] starting v{} (overlay diagnostics enabled)",
         env!("CARGO_PKG_VERSION")
     );
@@ -1042,6 +1126,12 @@ pub fn run() {
             app.manage(state.clone());
 
             // ── Tray ─────────────────────────────────────────────────────
+            // The ENTIRE tray block — menu items, menu, icon, registration —
+            // is fallible-but-not-fatal: menu construction can fail in the
+            // same shell-less/display-less situations as Shell_NotifyIcon
+            // (the original motivation below), and a missing tray must never
+            // take clipboard capture and the global shortcut down with it.
+            let tray_result = (|| -> tauri::Result<()> {
             let toggle_item =
                 MenuItem::with_id(app, TRAY_TOGGLE, TRAY_LABEL_DISABLE, true, None::<&str>)?;
             let history_label = if cfg!(target_os = "macos") {
@@ -1089,8 +1179,17 @@ pub fn run() {
                 ],
             )?;
 
-            let _ = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // Tray registration talks to the shell (`Shell_NotifyIcon` on
+            // Windows, StatusNotifier on Linux) and can fail when no shell is
+            // available — explorer.exe crashing/restarting, headless CI
+            // sessions.
+            let mut builder = TrayIconBuilder::new();
+            // No unwrap: a missing default window icon must degrade to an
+            // icon-less tray, not a setup panic that the closure can't catch.
+            if let Some(icon) = app.default_window_icon() {
+                builder = builder.icon(icon.clone());
+            }
+            builder
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .tooltip("Pluks — select to copy")
@@ -1110,7 +1209,7 @@ pub fn run() {
                         }
                         TRAY_HISTORY => toggle_history_window(&app_handle, false),
                         TRAY_TEST_NUDGE => {
-                            eprintln!("[pluks] tray: TEST_NUDGE clicked");
+                            crate::elog!("[pluks] tray: TEST_NUDGE clicked");
                             show_nudge_impl(
                                 &app_handle,
                                 &state_ref,
@@ -1119,7 +1218,7 @@ pub fn run() {
                             );
                         }
                         TRAY_TEST_PASTE_CONFIRM => {
-                            eprintln!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
+                            crate::elog!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
                             let (cx, cy) = cursor_pos();
                             show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
                         }
@@ -1149,6 +1248,11 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            Ok(())
+            })();
+            if let Err(e) = tray_result {
+                crate::elog!("[pluks] tray setup failed (continuing without tray): {e}");
+            }
 
             // ── Global shortcuts ─────────────────────────────────────────
             {
@@ -1163,7 +1267,7 @@ pub fn run() {
                             }
                         })
                 {
-                    eprintln!("[pluks] failed to register Cmd+Shift+V: {:?}", e);
+                    crate::elog!("[pluks] failed to register Cmd+Shift+V: {:?}", e);
                 }
 
                 // Cmd+Shift+Up / Down: navigate while the panel is visible.
@@ -1186,7 +1290,7 @@ pub fn run() {
                             }
                         },
                     ) {
-                        eprintln!("[pluks] failed to register {}: {:?}", combo, e);
+                        crate::elog!("[pluks] failed to register {}: {:?}", combo, e);
                     }
                 }
             }
@@ -1236,11 +1340,28 @@ pub fn run() {
             // the change and the panel flips itself to the main view.
             //
             // When everything is already granted we leave the window hidden
-            // — that's the intended invisible-launch default.
+            // — that's the intended invisible-launch default. The else branch
+            // *enforces* hidden rather than assuming it: on Windows the old
+            // `visible: false` + `focus: true` combination in tauri.conf.json
+            // left the freshly created window showing, which both put a
+            // stray panel on screen and permanently stalled the clipboard
+            // poller (`decide_poll` skips every tick with "panel_visible").
+            // The config now ships `focus: false` (the root fix); this hide
+            // is belt-and-suspenders against any future creation-time quirk.
+            // Hiding an already-hidden window is a no-op, so it's safe on
+            // macOS/Linux too.
             if !ax_is_trusted() || !input_monitoring_granted() {
                 if let Some(win) = app.get_webview_window(WIN_HISTORY) {
                     show_history_window(&win, false);
                 }
+            } else if let Some(win) = app.get_webview_window(WIN_HISTORY) {
+                // Only log when something was actually wrong: this line is the
+                // grep target for the visible-at-startup bug, and printing it
+                // on every healthy launch would bury the real occurrence.
+                if win.is_visible().unwrap_or(false) {
+                    crate::elog!("[pluks] history window visible at startup — forcing hidden");
+                }
+                let _ = win.hide();
             }
 
             Ok(())
