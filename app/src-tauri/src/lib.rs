@@ -1089,7 +1089,13 @@ pub fn run() {
                 ],
             )?;
 
-            let _ = TrayIconBuilder::new()
+            // Tray registration talks to the shell (`Shell_NotifyIcon` on
+            // Windows, StatusNotifier on Linux) and can fail when no shell is
+            // available — explorer.exe crashing/restarting, headless CI
+            // sessions. A missing tray icon must not take clipboard capture
+            // and the global shortcut down with it, so log and continue
+            // instead of aborting setup.
+            let tray_result = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -1148,7 +1154,10 @@ pub fn run() {
                         toggle_history_window(tray.app_handle(), false);
                     }
                 })
-                .build(app)?;
+                .build(app);
+            if let Err(e) = tray_result {
+                eprintln!("[pluks] tray icon creation failed (continuing without tray): {e}");
+            }
 
             // ── Global shortcuts ─────────────────────────────────────────
             {

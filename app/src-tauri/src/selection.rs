@@ -1168,10 +1168,12 @@ pub fn clipboard_is_concealed() -> bool {
 
 #[cfg(test)]
 mod clipboard_primitive_tests {
-    // The macOS / Windows variants are FFI into NSPasteboard / Win32 and are
-    // exercised by the per-OS build-smoke jobs in CI; here we pin the documented
-    // Linux fallback contract the poller relies on (no change token → content
-    // comparison; no concealed filtering yet).
+    // Per-OS coverage: Linux pins the documented fallback contract the poller
+    // relies on (no change token → content comparison; no concealed filtering
+    // yet). Windows executes the real Win32 FFI on the `app-rust-windows` CI
+    // job — the only place it can run. The macOS NSPasteboard variants remain
+    // compile-checked by the build-smoke matrix and covered by the manual
+    // release regression plan (tests/RELEASE_REGRESSION_TESTS.md).
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_has_no_change_token() {
@@ -1189,5 +1191,230 @@ mod clipboard_primitive_tests {
             !super::clipboard_is_concealed(),
             "Linux concealed detection is a documented no-op for now"
         );
+    }
+
+    // ── Windows: execute the real clipboard primitives ──────────────────────
+    //
+    // The clipboard is process-global mutable state and `cargo test` runs
+    // tests on parallel threads, so every test below serializes on CLIP_LOCK
+    // (recovering from poisoning — one failed test must not cascade). The raw
+    // writer mirrors the production code's FFI conventions (`extern "system"`
+    // declarations, no windows-sys dependency) and is what lets us plant the
+    // concealment formats password managers set.
+    #[cfg(target_os = "windows")]
+    mod windows {
+        use crate::selection::{
+            clipboard_change_token, clipboard_is_concealed, read_clipboard, write_clipboard,
+        };
+        use std::ffi::c_void;
+        use std::sync::{Mutex, MutexGuard};
+        use std::time::Duration;
+
+        static CLIP_LOCK: Mutex<()> = Mutex::new(());
+
+        fn lock() -> MutexGuard<'static, ()> {
+            CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        fn unique_marker(prefix: &str) -> String {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            format!("{prefix}-{nanos}")
+        }
+
+        #[link(name = "user32")]
+        extern "system" {
+            fn OpenClipboard(hwnd: *mut c_void) -> i32;
+            fn CloseClipboard() -> i32;
+            fn EmptyClipboard() -> i32;
+            fn SetClipboardData(format: u32, h: *mut c_void) -> *mut c_void;
+            fn RegisterClipboardFormatA(name: *const u8) -> u32;
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GlobalAlloc(flags: u32, bytes: usize) -> *mut c_void;
+            fn GlobalLock(h: *mut c_void) -> *mut c_void;
+            fn GlobalUnlock(h: *mut c_void) -> i32;
+            fn GlobalFree(h: *mut c_void) -> *mut c_void;
+        }
+
+        const CF_UNICODETEXT: u32 = 13;
+        const GMEM_MOVEABLE: u32 = 0x0002;
+
+        unsafe fn global_from_bytes(bytes: &[u8]) -> *mut c_void {
+            let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+            assert!(!h.is_null(), "GlobalAlloc failed");
+            let p = GlobalLock(h);
+            assert!(!p.is_null(), "GlobalLock failed");
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), p as *mut u8, bytes.len());
+            GlobalUnlock(h);
+            h
+        }
+
+        /// Set clipboard text plus an optional extra registered format: a
+        /// DWORD payload (`Some(value)`) for value-carrying formats like
+        /// `CanIncludeInClipboardHistory`, or a 4-byte placeholder (`None`)
+        /// for presence-only markers. `name` must be NUL-terminated.
+        fn set_clipboard_with_format(text: &str, extra: Option<(&[u8], Option<u32>)>) {
+            unsafe {
+                // Another process may briefly hold the clipboard — retry,
+                // like production's `clipboard_is_concealed` does.
+                let mut opened = false;
+                for _ in 0..50 {
+                    if OpenClipboard(std::ptr::null_mut()) != 0 {
+                        opened = true;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert!(opened, "OpenClipboard failed after retries");
+                EmptyClipboard();
+
+                let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let bytes =
+                    std::slice::from_raw_parts(utf16.as_ptr() as *const u8, utf16.len() * 2);
+                let htext = global_from_bytes(bytes);
+                // On success the system owns the handle; free it only on failure.
+                if SetClipboardData(CF_UNICODETEXT, htext).is_null() {
+                    GlobalFree(htext);
+                    CloseClipboard();
+                    panic!("SetClipboardData(CF_UNICODETEXT) failed");
+                }
+
+                if let Some((name, dword)) = extra {
+                    let fmt = RegisterClipboardFormatA(name.as_ptr());
+                    assert_ne!(fmt, 0, "RegisterClipboardFormatA failed");
+                    let payload: Vec<u8> = match dword {
+                        Some(v) => v.to_le_bytes().to_vec(),
+                        None => vec![0u8; 4],
+                    };
+                    let hextra = global_from_bytes(&payload);
+                    if SetClipboardData(fmt, hextra).is_null() {
+                        GlobalFree(hextra);
+                        CloseClipboard();
+                        panic!("SetClipboardData(extra format) failed");
+                    }
+                }
+                CloseClipboard();
+            }
+        }
+
+        #[test]
+        fn change_token_advances_after_write() {
+            let _g = lock();
+            let t1 = clipboard_change_token().expect("Windows must expose a sequence number");
+            assert!(
+                write_clipboard(&unique_marker("pluks-token-test")),
+                "arboard clipboard write failed"
+            );
+            // The sequence number updates synchronously with the write, but
+            // give a busy runner a moment before declaring failure.
+            let mut t2 = clipboard_change_token().unwrap();
+            for _ in 0..40 {
+                if t2 != t1 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+                t2 = clipboard_change_token().unwrap();
+            }
+            assert_ne!(
+                t1, t2,
+                "GetClipboardSequenceNumber must advance after a clipboard write"
+            );
+        }
+
+        #[test]
+        fn clipboard_roundtrips_through_arboard() {
+            let _g = lock();
+            // No trailing whitespace: read_clipboard trims it.
+            let marker = unique_marker("pluks-roundtrip");
+            assert!(write_clipboard(&marker), "arboard clipboard write failed");
+            let mut clip = None;
+            let mut got = read_clipboard(&mut clip);
+            for _ in 0..40 {
+                if got.as_deref() == Some(marker.as_str()) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+                got = read_clipboard(&mut clip);
+            }
+            assert_eq!(got.as_deref(), Some(marker.as_str()));
+        }
+
+        #[test]
+        fn plain_text_is_not_concealed() {
+            let _g = lock();
+            set_clipboard_with_format("pluks-plain-text", None);
+            assert!(
+                !clipboard_is_concealed(),
+                "plain text must not be treated as concealed"
+            );
+        }
+
+        #[test]
+        fn exclude_format_presence_is_concealed() {
+            let _g = lock();
+            set_clipboard_with_format(
+                "pluks-secret",
+                Some((b"ExcludeClipboardContentFromMonitorProcessing\0", None)),
+            );
+            assert!(
+                clipboard_is_concealed(),
+                "presence of the KeePass-convention exclude format must conceal"
+            );
+        }
+
+        #[test]
+        fn history_dword_zero_is_concealed() {
+            let _g = lock();
+            set_clipboard_with_format(
+                "pluks-secret",
+                Some((b"CanIncludeInClipboardHistory\0", Some(0))),
+            );
+            assert!(
+                clipboard_is_concealed(),
+                "CanIncludeInClipboardHistory=0 must conceal"
+            );
+        }
+
+        #[test]
+        fn history_dword_one_is_allowed() {
+            let _g = lock();
+            set_clipboard_with_format(
+                "pluks-allowed",
+                Some((b"CanIncludeInClipboardHistory\0", Some(1))),
+            );
+            assert!(
+                !clipboard_is_concealed(),
+                "CanIncludeInClipboardHistory=1 explicitly allows history capture"
+            );
+        }
+    }
+}
+
+// Windows desktop-state primitives. Both can legitimately report "nothing" in
+// a non-interactive window station (no foreground window, no cursor), so these
+// pin the production fallback contract rather than demanding an interactive
+// desktop — the windows-smoke workflow covers interactive behavior with the
+// real app.
+#[cfg(all(test, target_os = "windows"))]
+mod win32_desktop_primitive_tests {
+    #[test]
+    fn cursor_pos_executes_with_finite_coordinates() {
+        // Contract: real coordinates (negative is legal on multi-monitor
+        // setups) or the documented (0.0, 0.0) fallback — never a panic.
+        let (x, y) = super::cursor_pos();
+        assert!(x.is_finite() && y.is_finite());
+    }
+
+    #[test]
+    fn frontmost_pid_is_positive_when_present() {
+        // GetForegroundWindow may legitimately be null on a desktop with no
+        // foreground window; only the Some case carries a guarantee.
+        if let Some(pid) = super::frontmost_pid() {
+            assert!(pid > 0, "a reported foreground PID must be positive");
+        }
     }
 }

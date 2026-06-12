@@ -1,0 +1,222 @@
+# Runtime smoke test for the Windows desktop app.
+#
+# The build-smoke matrix in tests.yml only proves the Windows target *compiles*;
+# nothing in CI ever executed the binary before this workflow existed. This job
+# installs the real MSI, launches the real exe, and proves the core promise on
+# an actual Windows machine: a clipboard write lands in Pluks history.
+#
+# What it does NOT prove (needs a human at a real desktop): drag-select /
+# double-click capture in third-party apps, overlay rendering & DPI, tray
+# interaction with a real shell, autostart across reboots, the updater upgrade
+# path. The website's "Beta" label on the Windows download reflects exactly
+# this boundary.
+name: Windows Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      msi_source:
+        description: "MSI to test: build from this ref, or download the latest published release"
+        type: choice
+        options: [build, latest-release]
+        default: build
+  push:
+    branches:
+      - claude/wizardly-fermi-hmz7z8
+
+concurrency:
+  group: win-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Install, launch, capture (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # Diagnosis affordances FIRST — no human has a Windows box to reproduce
+      # failures on, so every crash must leave a post-mortemable trace.
+      - name: Enable Windows Error Reporting local crash dumps
+        run: |
+          New-Item -Force -ItemType Directory C:\werdumps | Out-Null
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpFolder /t REG_EXPAND_SZ /d C:\werdumps /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpType /t REG_DWORD /d 2 /f
+
+      - name: Ensure WebView2 runtime
+        run: |
+          $key = Get-ItemProperty -ErrorAction SilentlyContinue `
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          if ($key) {
+            Write-Host "WebView2 runtime present: $($key.pv)"
+          } else {
+            Write-Host "WebView2 runtime missing - installing"
+            Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile wv2.exe
+            Start-Process .\wv2.exe -ArgumentList "/silent","/install" -Wait
+          }
+
+      - uses: actions/setup-node@v4
+        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+      # See the long comment in release.yml. Same workaround: bootstrap
+      # rustup from scratch on Windows, then prepend ~/.cargo/bin to
+      # GITHUB_PATH so subsequent `cargo` calls hit the real shim
+      # instead of the runner image's broken rustup-init-as-cargo stub.
+      - name: Bootstrap Rust toolchain (Windows image workaround)
+        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        run: |
+          $rustupInit = "$env:TEMP\rustup-init.exe"
+          Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
+          & $rustupInit --default-toolchain stable --profile minimal -y --quiet
+          if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with $LASTEXITCODE" }
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        with:
+          workspaces: app/src-tauri -> target
+
+      # PLACEHOLDER values trip analytics.ts's isRealKey() guard, disabling
+      # PostHog/Sentry at build time. tauri.smoke.conf.json additionally turns
+      # off updater-artifact signing (no key in this workflow) and skips the
+      # NSIS bundle. The pre-seeded settings.json below is the second,
+      # runtime-level analytics kill — it also covers latest-release mode,
+      # where the MSI was built with real keys.
+      - name: Build MSI from this ref
+        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        working-directory: app
+        env:
+          VITE_POSTHOG_KEY: PLACEHOLDER
+          VITE_SENTRY_DSN: PLACEHOLDER
+        run: |
+          npm ci
+          npx tauri build --config src-tauri/tauri.smoke.conf.json
+          $msi = Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "tauri build produced no MSI" }
+          "PLUKS_MSI=$($msi.FullName)" >> $env:GITHUB_ENV
+
+      - name: Download MSI from latest release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.msi_source == 'latest-release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -Force -ItemType Directory release-msi | Out-Null
+          gh release download --repo ${{ github.repository }} --pattern "*.msi" --dir release-msi
+          $msi = Get-ChildItem release-msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "latest release has no MSI asset" }
+          "PLUKS_MSI=$($msi.FullName)" >> $env:GITHUB_ENV
+
+      - name: Pre-seed app data (telemetry off, deterministic anon id)
+        run: |
+          $dir = Join-Path $env:APPDATA "app.pluks.desktop"
+          New-Item -Force -ItemType Directory $dir | Out-Null
+          @'
+          {"anon_id":"00000000-0000-4000-8000-0000c1c1c1c1","opt_out":true,"crash_opt_out":true}
+          '@ | Set-Content (Join-Path $dir "settings.json")
+          Get-Content (Join-Path $dir "settings.json")
+
+      - name: Install MSI silently
+        run: |
+          Write-Host "Installing $env:PLUKS_MSI"
+          $p = Start-Process msiexec -ArgumentList "/i","`"$env:PLUKS_MSI`"","/qn","/l*v","msi-install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec exited with $($p.ExitCode)" }
+
+      - name: Locate installed exe
+        run: |
+          $exe = "C:\Program Files\Pluks\Pluks.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "Default path missing - searching"
+            $hit = Get-ChildItem "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA" `
+                     -Recurse -Filter Pluks.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $hit) { throw "Pluks.exe not found anywhere after install" }
+            $exe = $hit.FullName
+          }
+          Write-Host "Found $exe"
+          "PLUKS_EXE=$exe" >> $env:GITHUB_ENV
+
+      - name: Launch and assert alive after 30s
+        run: |
+          $proc = Start-Process $env:PLUKS_EXE -PassThru `
+                    -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log
+          "PLUKS_PID=$($proc.Id)" >> $env:GITHUB_ENV
+          Start-Sleep -Seconds 30
+          if ($proc.HasExited) {
+            Write-Host "--- stderr ---"; Get-Content app-stderr.log -ErrorAction SilentlyContinue
+            throw "Pluks exited within 30s, exit code $($proc.ExitCode)"
+          }
+          Write-Host "Pluks alive after 30s (pid $($proc.Id))"
+          Get-Content app-stderr.log -ErrorAction SilentlyContinue | Select-Object -First 20
+
+      # The capture pipeline under test: clipboard poller -> decide_poll ->
+      # SQLite history. This runs without any input hooks or permissions
+      # (start_clipboard_poller is unconditional in lib.rs), so it works even
+      # if the runner session can't install low-level input hooks.
+      - name: Capture pipeline - clipboard write lands in history DB
+        run: |
+          $marker = "pluks-ci-smoke-$(Get-Random)"
+          $db = Join-Path $env:APPDATA "app.pluks.desktop\pluck.db"
+          $env:PLUKS_DB = $db
+          $env:PLUKS_MARKER = $marker
+          Set-Clipboard -Value $marker
+          Write-Host "Wrote marker '$marker', polling $db"
+          $found = $false
+          foreach ($i in 1..40) {            # poller ticks ~500ms; 20s budget
+            Start-Sleep -Milliseconds 500
+            if (Test-Path $db) {
+              $hit = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER'] in c))"
+              if ([int]$hit -gt 0) { $found = $true; break }
+            }
+          }
+          if (-not $found) {
+            if (Test-Path $db) {
+              python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); [print(repr(r)) for r in con.execute('SELECT id, substr(content,1,80), copied_at FROM history')]"
+            } else { Write-Host "history DB never appeared" }
+            throw "marker never appeared in pluck.db history"
+          }
+          Write-Host "First capture OK after ~$([Math]::Round($i*0.5,1))s"
+
+          # A second clip proves the poll loop survives past one capture.
+          Set-Clipboard -Value "$marker-second"
+          Start-Sleep -Seconds 3
+          $env:PLUKS_MARKER2 = "$marker-second"
+          $hit2 = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER2'] in c))"
+          if ([int]$hit2 -lt 1) { throw "second clip never captured - poller died after first capture?" }
+
+          $p = Get-Process -Id $env:PLUKS_PID -ErrorAction SilentlyContinue
+          if (-not $p) { throw "Pluks process died during the capture test" }
+          Write-Host "Capture pipeline verified: both clips recorded, process alive"
+
+      - name: Stop app
+        if: always()
+        run: |
+          if ($env:PLUKS_PID) { Stop-Process -Id $env:PLUKS_PID -Force -ErrorAction SilentlyContinue }
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          New-Item -Force -ItemType Directory diag | Out-Null
+          Copy-Item app-stdout.log,app-stderr.log,msi-install.log diag -ErrorAction SilentlyContinue
+          Copy-Item "$env:TEMP\pluks-panic.log" diag -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $env:APPDATA "app.pluks.desktop\*") diag -ErrorAction SilentlyContinue
+          Copy-Item C:\werdumps\* diag -ErrorAction SilentlyContinue
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-1)} -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -in 'Application Error','Windows Error Reporting','.NET Runtime' -or $_.Message -match 'Pluks' } |
+            Format-List TimeCreated,ProviderName,Id,Message | Out-File diag\eventlog.txt
+          Get-Process | Sort-Object ProcessName | Format-Table -AutoSize | Out-File diag\processes.txt
+
+      - name: Upload diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-diagnostics
+          path: diag
+          retention-days: 7
