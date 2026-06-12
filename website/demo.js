@@ -208,14 +208,19 @@
   (function highlightPlatformCard() {
     const ua = navigator.userAgent.toLowerCase();
     let cardId;
-    if (ua.includes("mac os x") || ua.includes("macintosh")) {
+    if (/iphone|ipad|ipod/.test(ua)) {
+      // iOS UAs contain "like Mac OS X" — without this guard iPhones get the
+      // Mac card highlighted and a .dmg recommended. No mobile build exists,
+      // so highlight nothing.
+      cardId = null;
+    } else if (ua.includes("mac os x") || ua.includes("macintosh")) {
       cardId = "card-mac";
     } else if (ua.includes("windows")) {
       cardId = "card-win";
     } else {
       cardId = "card-linux";
     }
-    const card = document.getElementById(cardId);
+    const card = cardId && document.getElementById(cardId);
     if (card) {
       card.style.borderColor = "rgba(252,76,2,.5)";
       card.style.boxShadow = "0 0 0 1px rgba(252,76,2,.15), 0 8px 32px rgba(252,76,2,.15)";
@@ -231,15 +236,17 @@
     // runs synchronously, before the async release fetch resolves, so the
     // [data-dl-win] href pass in index.html picks these up too. The Mac
     // card's own button (#dl-mac-card) is intentionally left alone.
+    function retargetToWindows(el, label) {
+      if (!el) return;
+      el.removeAttribute("data-dl-mac");
+      el.setAttribute("data-dl-win", "");
+      const icon = el.querySelector(".apple-icon");
+      if (icon) icon.remove();
+      el.textContent = label;
+    }
     if (cardId === "card-win") {
-      [document.getElementById("dl-mac"), document.querySelector("nav .nav-cta")].forEach((el, i) => {
-        if (!el) return;
-        el.removeAttribute("data-dl-mac");
-        el.setAttribute("data-dl-win", "");
-        const icon = el.querySelector(".apple-icon");
-        if (icon) icon.remove();
-        el.textContent = i === 0 ? "Download free for Windows (beta)" : "Download for Windows";
-      });
+      retargetToWindows(document.getElementById("dl-mac"), "Download free for Windows (beta)");
+      retargetToWindows(document.querySelector("nav .nav-cta"), "Download for Windows");
     }
   })();
 })();

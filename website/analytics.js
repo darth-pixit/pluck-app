@@ -376,17 +376,25 @@
   }
 
   function platformFromEl(el) {
+    var href = el.href || "";
+    // The resolved asset href is the most reliable signal: navigator.userAgent
+    // reports "Intel" on every Mac (even Apple Silicon), and demo.js retargets
+    // the Mac-labeled nav/hero CTAs at the MSI for Windows visitors — element
+    // ids lie after that swap, so they are only a fallback.
+    if (/dmg/i.test(href)) return /Intel|x64/.test(href) ? "mac_intel" : "mac";
+    if (/msi/i.test(href)) return "win";
+    if (/AppImage/i.test(href)) return "linux_appimage";
+    if (/\.deb/i.test(href)) return "linux_deb";
+    // Unresolved href (GitHub latest-release fetch pending or rate-limited):
+    // the data-dl-* attribute is the live truth — demo.js swaps it when
+    // retargeting — with static ids as the last resort.
+    if (el.hasAttribute && el.hasAttribute("data-dl-win")) return "win";
+    if (el.hasAttribute && el.hasAttribute("data-dl-mac")) return "mac";
+    if (el.hasAttribute && el.hasAttribute("data-dl-linux")) return "linux_appimage";
     var id = el.id || "";
-    // Fall through to the href-based check below: navigator.userAgent reports
-    // "Intel" on every Mac (even Apple Silicon), so it can't distinguish the
-    // two. The resolved DMG href is the reliable signal.
-    if (id === "dl-mac" && !/dmg/i.test(el.href || "")) return "mac";
+    if (id === "dl-mac" || id === "dl-mac-card") return "mac";
     if (id === "dl-win")   return "win";
     if (id === "dl-linux") return "linux_appimage";
-    if (/dmg/i.test(el.href || "")) return /Intel|x64/.test(el.href) ? "mac_intel" : "mac";
-    if (/msi/i.test(el.href || "")) return "win";
-    if (/AppImage/i.test(el.href || "")) return "linux_appimage";
-    if (/\.deb/i.test(el.href || "")) return "linux_deb";
     return "unknown";
   }
 

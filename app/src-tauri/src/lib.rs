@@ -880,7 +880,11 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // unconditional: it's one line per app start and it's the proof that
         // this thread exists and what change token it baselined — without it
         // a silent capture stall is indistinguishable from a dead thread.
-        let debug = std::env::var("PLUKS_POLL_DEBUG").is_ok();
+        // "0" and empty mean OFF — a bare `is_ok()` would treat an explicit
+        // disable as enable.
+        let debug = std::env::var("PLUKS_POLL_DEBUG")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false);
         crate::elog!("[pluks] clipboard poller online, initial token {last_token:?}");
         let mut tick: u64 = 0;
 
@@ -1102,6 +1106,12 @@ pub fn run() {
             app.manage(state.clone());
 
             // ── Tray ─────────────────────────────────────────────────────
+            // The ENTIRE tray block — menu items, menu, icon, registration —
+            // is fallible-but-not-fatal: menu construction can fail in the
+            // same shell-less/display-less situations as Shell_NotifyIcon
+            // (the original motivation below), and a missing tray must never
+            // take clipboard capture and the global shortcut down with it.
+            let tray_result = (|| -> tauri::Result<()> {
             let toggle_item =
                 MenuItem::with_id(app, TRAY_TOGGLE, TRAY_LABEL_DISABLE, true, None::<&str>)?;
             let history_label = if cfg!(target_os = "macos") {
@@ -1152,11 +1162,14 @@ pub fn run() {
             // Tray registration talks to the shell (`Shell_NotifyIcon` on
             // Windows, StatusNotifier on Linux) and can fail when no shell is
             // available — explorer.exe crashing/restarting, headless CI
-            // sessions. A missing tray icon must not take clipboard capture
-            // and the global shortcut down with it, so log and continue
-            // instead of aborting setup.
-            let tray_result = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // sessions.
+            let mut builder = TrayIconBuilder::new();
+            // No unwrap: a missing default window icon must degrade to an
+            // icon-less tray, not a setup panic that the closure can't catch.
+            if let Some(icon) = app.default_window_icon() {
+                builder = builder.icon(icon.clone());
+            }
+            builder
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .tooltip("Pluks — select to copy")
@@ -1214,9 +1227,11 @@ pub fn run() {
                         toggle_history_window(tray.app_handle(), false);
                     }
                 })
-                .build(app);
+                .build(app)?;
+            Ok(())
+            })();
             if let Err(e) = tray_result {
-                crate::elog!("[pluks] tray icon creation failed (continuing without tray): {e}");
+                crate::elog!("[pluks] tray setup failed (continuing without tray): {e}");
             }
 
             // ── Global shortcuts ─────────────────────────────────────────
@@ -1306,22 +1321,26 @@ pub fn run() {
             //
             // When everything is already granted we leave the window hidden
             // — that's the intended invisible-launch default. The else branch
-            // *enforces* hidden rather than assuming it: on Windows the
+            // *enforces* hidden rather than assuming it: on Windows the old
             // `visible: false` + `focus: true` combination in tauri.conf.json
-            // can leave the freshly created window showing, which both puts a
-            // stray panel on screen and permanently stalls the clipboard
+            // left the freshly created window showing, which both put a
+            // stray panel on screen and permanently stalled the clipboard
             // poller (`decide_poll` skips every tick with "panel_visible").
-            // Hiding an already-hidden window is a no-op, so this is safe on
+            // The config now ships `focus: false` (the root fix); this hide
+            // is belt-and-suspenders against any future creation-time quirk.
+            // Hiding an already-hidden window is a no-op, so it's safe on
             // macOS/Linux too.
             if !ax_is_trusted() || !input_monitoring_granted() {
                 if let Some(win) = app.get_webview_window(WIN_HISTORY) {
                     show_history_window(&win, false);
                 }
             } else if let Some(win) = app.get_webview_window(WIN_HISTORY) {
-                crate::elog!(
-                    "[pluks] history window visible at startup: {:?} (forcing hidden)",
-                    win.is_visible()
-                );
+                // Only log when something was actually wrong: this line is the
+                // grep target for the visible-at-startup bug, and printing it
+                // on every healthy launch would bury the real occurrence.
+                if win.is_visible().unwrap_or(false) {
+                    crate::elog!("[pluks] history window visible at startup — forcing hidden");
+                }
                 let _ = win.hide();
             }
 

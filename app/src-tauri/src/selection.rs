@@ -1258,6 +1258,18 @@ mod clipboard_primitive_tests {
         /// `CanIncludeInClipboardHistory`, or a 4-byte placeholder (`None`)
         /// for presence-only markers. `name` must be NUL-terminated.
         fn set_clipboard_with_format(text: &str, extra: Option<(&[u8], Option<u32>)>) {
+            // Closes the clipboard even when an assert/panic below unwinds —
+            // a failing test must not leave the clipboard open, or every
+            // later (CLIP_LOCK-serialized) test cascades into
+            // "OpenClipboard failed after retries" and masks the root cause.
+            struct ClipGuard;
+            impl Drop for ClipGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        CloseClipboard();
+                    }
+                }
+            }
             unsafe {
                 // Another process may briefly hold the clipboard — retry,
                 // like production's `clipboard_is_concealed` does.
@@ -1270,6 +1282,7 @@ mod clipboard_primitive_tests {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 assert!(opened, "OpenClipboard failed after retries");
+                let _guard = ClipGuard;
                 EmptyClipboard();
 
                 let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1279,7 +1292,6 @@ mod clipboard_primitive_tests {
                 // On success the system owns the handle; free it only on failure.
                 if SetClipboardData(CF_UNICODETEXT, htext).is_null() {
                     GlobalFree(htext);
-                    CloseClipboard();
                     panic!("SetClipboardData(CF_UNICODETEXT) failed");
                 }
 
@@ -1293,11 +1305,9 @@ mod clipboard_primitive_tests {
                     let hextra = global_from_bytes(&payload);
                     if SetClipboardData(fmt, hextra).is_null() {
                         GlobalFree(hextra);
-                        CloseClipboard();
                         panic!("SetClipboardData(extra format) failed");
                     }
                 }
-                CloseClipboard();
             }
         }
 

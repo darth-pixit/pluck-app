@@ -20,9 +20,20 @@ on:
         type: choice
         options: [build, latest-release]
         default: build
-  push:
-    branches:
-      - claude/wizardly-fermi-hmz7z8
+  # Called by release.yml after publishing, with msi_source=latest-release —
+  # this is what makes "every release is install- and run-tested on Windows"
+  # (website/README) literally true.
+  workflow_call:
+    inputs:
+      msi_source:
+        type: string
+        default: build
+  # PRs that touch the app get the full install/launch/capture run against
+  # their own MSI.
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/windows-smoke.yml"
 
 concurrency:
   group: win-smoke-${{ github.ref }}
@@ -60,19 +71,19 @@ jobs:
           }
 
       - uses: actions/setup-node@v4
-        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
         with:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: app/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
       # See the long comment in release.yml. Same workaround: bootstrap
       # rustup from scratch on Windows, then prepend ~/.cargo/bin to
       # GITHUB_PATH so subsequent `cargo` calls hit the real shim
       # instead of the runner image's broken rustup-init-as-cargo stub.
       - name: Bootstrap Rust toolchain (Windows image workaround)
-        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
         run: |
           $rustupInit = "$env:TEMP\rustup-init.exe"
           Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustupInit
@@ -81,7 +92,7 @@ jobs:
           "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
       - uses: Swatinem/rust-cache@v2
-        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
         with:
           workspaces: app/src-tauri -> target
 
@@ -92,7 +103,7 @@ jobs:
       # runtime-level analytics kill — it also covers latest-release mode,
       # where the MSI was built with real keys.
       - name: Build MSI from this ref
-        if: ${{ github.event_name == 'push' || inputs.msi_source == 'build' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.msi_source == 'build' }}
         working-directory: app
         env:
           VITE_POSTHOG_KEY: PLACEHOLDER
@@ -105,7 +116,7 @@ jobs:
           "PLUKS_MSI=$($msi.FullName)" >> $env:GITHUB_ENV
 
       - name: Download MSI from latest release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.msi_source == 'latest-release' }}
+        if: ${{ inputs.msi_source == 'latest-release' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -169,10 +180,15 @@ jobs:
             Set-Content launch.cmd -Encoding ascii
           Start-Process cmd -ArgumentList "/c", "launch.cmd"
           Start-Sleep -Seconds 5
-          $proc = Get-Process -Name pluck -ErrorAction SilentlyContinue
+          # Derive the process name from the exe the locate step actually
+          # found (pluck.exe today, Pluks.exe if Tauri ever renames it), and
+          # pin to a single process — Get-Process returns a collection when
+          # several match, and a collection's .HasExited is always truthy.
+          $procName = [IO.Path]::GetFileNameWithoutExtension($env:PLUKS_EXE)
+          $proc = Get-Process -Name $procName -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $proc) {
             Write-Host "--- stderr ---"; Get-Content app-stderr.log -ErrorAction SilentlyContinue
-            throw "pluck.exe not running 5s after launch"
+            throw "$procName not running 5s after launch"
           }
           "PLUKS_PID=$($proc.Id)" >> $env:GITHUB_ENV
           Start-Sleep -Seconds 25
@@ -201,11 +217,14 @@ jobs:
           Set-Clipboard -Value $marker
           Write-Host "clipboard seq after write: $([W.U]::GetClipboardSequenceNumber())"
           Write-Host "Wrote marker '$marker', polling $db"
+          # Select -Last 1 guards the [int] cast: if python ever prints a
+          # banner/warning line, $hit becomes an array and the cast throws,
+          # bypassing the diagnostic branch this loop exists to feed.
           $found = $false
-          foreach ($i in 1..40) {            # poller ticks ~500ms; 20s budget
+          foreach ($i in 1..40) {            # poller ticks ~500ms; ~25s wall incl. python spawns
             Start-Sleep -Milliseconds 500
             if (Test-Path $db) {
-              $hit = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER'] in c))"
+              $hit = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER'] in c))" | Select-Object -Last 1
               if ([int]$hit -gt 0) { $found = $true; break }
             }
           }
@@ -218,11 +237,17 @@ jobs:
           Write-Host "First capture OK after ~$([Math]::Round($i*0.5,1))s"
 
           # A second clip proves the poll loop survives past one capture.
+          # Polled like the first one — a single fixed-delay check flakes
+          # whenever the runner stalls (AV scan, msiexec cleanup) for >3s.
           Set-Clipboard -Value "$marker-second"
-          Start-Sleep -Seconds 3
           $env:PLUKS_MARKER2 = "$marker-second"
-          $hit2 = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER2'] in c))"
-          if ([int]$hit2 -lt 1) { throw "second clip never captured - poller died after first capture?" }
+          $found2 = $false
+          foreach ($j in 1..20) {            # 10s budget
+            Start-Sleep -Milliseconds 500
+            $hit2 = python -c "import os,sqlite3; con=sqlite3.connect(os.environ['PLUKS_DB']); print(sum(1 for (c,) in con.execute('SELECT content FROM history') if os.environ['PLUKS_MARKER2'] in c))" | Select-Object -Last 1
+            if ([int]$hit2 -gt 0) { $found2 = $true; break }
+          }
+          if (-not $found2) { throw "second clip never captured - poller died after first capture?" }
 
           $p = Get-Process -Id $env:PLUKS_PID -ErrorAction SilentlyContinue
           if (-not $p) { throw "Pluks process died during the capture test" }
