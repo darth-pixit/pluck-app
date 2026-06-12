@@ -217,6 +217,24 @@ impl AppState {
     }
 }
 
+/// Insert `text` into history, stamp it as the last recorded clip, and
+/// broadcast `history-added` so the live panel updates. The single entry point
+/// for clips that are already on the OS clipboard but not yet in history —
+/// shared by the clipboard poller, the onboarding-tour `record_history`
+/// command, and the long-press fresh-clipboard path (`paste::try_fire`).
+/// Insert is top-row deduped, so racing callers recording the same clip
+/// collapse to one row.
+pub(crate) fn record_clip(
+    app: &AppHandle,
+    state: &AppState,
+    text: &str,
+) -> rusqlite::Result<HistoryItem> {
+    let item = state.db().insert(text)?;
+    state.remember_clip(&item.content);
+    let _ = app.emit(EVT_HISTORY_ADDED, &item);
+    Ok(item)
+}
+
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -261,12 +279,10 @@ fn copy_text(text: String, state: State<Arc<AppState>>) -> bool {
 /// inflate `selects_total` and pop nudge pills over the tour).
 #[tauri::command]
 fn record_history(app: AppHandle, state: State<Arc<AppState>>, text: String) -> Option<HistoryItem> {
-    let item = state.db().insert(&text).ok()?;
-    // Keep the poller from re-emitting this clip: the tour already put it on the
-    // clipboard, and we're recording it here.
-    state.remember_clip(&item.content);
-    let _ = app.emit(EVT_HISTORY_ADDED, &item);
-    Some(item)
+    // `record_clip` stamps the last recorded clip, which keeps the poller from
+    // re-emitting this one: the tour already put it on the clipboard, and
+    // we're recording it here.
+    record_clip(&app, &state, &text).ok()
 }
 
 #[tauri::command]
@@ -954,14 +970,12 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             );
 
             match outcome {
-                PollOutcome::Record(t) => match state.db().insert(&t) {
-                    Ok(item) => {
-                        state.remember_clip(&item.content);
-                        // `history-added`, not `new-selection`: this updates the
-                        // panel list but must NOT run the affirmation/nudge
-                        // pipeline or inflate the select-to-copy adoption
-                        // counters — a manual copy isn't a select-to-copy.
-                        let _ = app_handle.emit(EVT_HISTORY_ADDED, &item);
+                // `record_clip` emits `history-added`, not `new-selection`:
+                // this updates the panel list but must NOT run the
+                // affirmation/nudge pipeline or inflate the select-to-copy
+                // adoption counters — a manual copy isn't a select-to-copy.
+                PollOutcome::Record(t) => match record_clip(&app_handle, &state, &t) {
+                    Ok(_) => {
                         last_token = token;
                         last_skip_reason = None;
                     }

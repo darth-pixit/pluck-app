@@ -24,7 +24,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::history::HistoryItem;
 use crate::selection::{
-    activate_pid, focus_is_secure_field, frontmost_pid, simulate_paste, MouseEvent,
+    activate_pid, clipboard_is_concealed, focus_is_secure_field, frontmost_pid, read_clipboard,
+    simulate_paste, Clipboard, MouseEvent,
 };
 use crate::settings;
 use crate::AppState;
@@ -151,16 +152,25 @@ fn fsm_step(fsm: FsmState, ev: MouseEvent) -> Step {
 #[derive(Debug, PartialEq)]
 enum FireDecision {
     Skip(&'static str),
-    Paste { content: String, char_count: usize },
+    /// The clipboard holds a copy Pluks didn't write and the poller hasn't
+    /// recorded yet: record it, then paste it — no clipboard write needed,
+    /// the content is already there.
+    PasteFresh { content: String, char_count: usize },
+    /// The clipboard matches the last recorded clip (or is empty, unreadable,
+    /// or concealed): paste the most-recent history item, re-writing it to
+    /// the clipboard first.
+    PasteRecent { content: String, char_count: usize },
 }
 
-/// Pure decision: given the gate inputs and the most-recent clip, do we
-/// paste, and which content? Split out so the suppression matrix is
-/// testable without tauri / FFI dependencies.
+/// Pure decision: given the gate inputs, the current clipboard, and the
+/// most-recent clip, do we paste, and which content? Split out so the
+/// suppression matrix is testable without tauri / FFI dependencies.
 fn decide_fire(
     enabled: bool,
     panel_visible: bool,
     secure_field: bool,
+    clipboard_text: Option<String>,
+    last_recorded: Option<&str>,
     most_recent: Option<HistoryItem>,
 ) -> FireDecision {
     if !enabled {
@@ -172,11 +182,26 @@ fn decide_fire(
     if secure_field {
         return FireDecision::Skip("secure_field");
     }
+    // A clipboard value Pluks didn't put there is a manual copy the poller
+    // hasn't banked yet (its tick is 500 ms; a long-press fires after 350 ms,
+    // so copy-then-hold races ahead of it). That clip — not the possibly
+    // stale DB top row — is "what I just copied", so it wins. Writing the DB
+    // row over it here would also destroy the copy before it ever reached
+    // history.
+    if let Some(text) = clipboard_text {
+        if last_recorded != Some(text.as_str()) {
+            let char_count = text.chars().count();
+            return FireDecision::PasteFresh {
+                content: text,
+                char_count,
+            };
+        }
+    }
     let Some(item) = most_recent else {
         return FireDecision::Skip("empty_history");
     };
     let char_count = item.content.chars().count();
-    FireDecision::Paste {
+    FireDecision::PasteRecent {
         content: item.content,
         char_count,
     }
@@ -188,6 +213,14 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
         .get_webview_window(crate::WIN_HISTORY)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
+    // Privacy gate mirrors the clipboard poller: a concealed clipboard
+    // (password-manager flagged) is never read, so it can't paste fresh and
+    // the decision falls back to history.
+    let clipboard_text = if clipboard_is_concealed() {
+        None
+    } else {
+        read_clipboard(&mut Clipboard::new().ok())
+    };
     let most_recent = state
         .db()
         .get_all()
@@ -195,47 +228,64 @@ fn try_fire(x: f64, y: f64, state: &Arc<AppState>, app: &AppHandle) -> FsmState 
         .into_iter()
         .next();
 
-    match decide_fire(
+    let (content, char_count, fresh) = match decide_fire(
         cfg.enable_long_press_paste,
         panel_visible,
         focus_is_secure_field(),
+        clipboard_text,
+        state.last_recorded_clip().as_deref(),
         most_recent,
     ) {
         FireDecision::Skip(reason) => {
             crate::elog!("[pluks] try_fire: suppressed {}", reason);
             let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": reason }));
-            FsmState::Disarmed
+            return FsmState::Disarmed;
         }
-        FireDecision::Paste {
+        FireDecision::PasteFresh {
             content,
             char_count,
-        } => {
-            // Capture which app owned the press so paste lands there even if
-            // focus drifts before we synthesize Cmd+V.
-            let our_pid = std::process::id() as i32;
-            let target = frontmost_pid().filter(|&p| p != our_pid);
-            state.set_target_pid(target);
+        } => (content, char_count, true),
+        FireDecision::PasteRecent {
+            content,
+            char_count,
+        } => (content, char_count, false),
+    };
 
-            // Remembered write: long-press puts the most-recent clip back on
-            // the clipboard, and the poller must not re-record that as a fresh
-            // external copy.
-            if !state.write_clipboard_remembered(&content) {
-                crate::elog!("[pluks] try_fire: clipboard write failed");
-                let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": "clipboard_failed" }));
-                state.set_target_pid(None);
-                return FsmState::Disarmed;
-            }
-            if let Some(pid) = state.take_target_pid() {
-                activate_pid(pid);
-                thread::sleep(Duration::from_millis(POST_ACTIVATE_SLEEP_MS));
-            }
-            simulate_paste();
+    // Capture which app owned the press so paste lands there even if
+    // focus drifts before we synthesize Cmd+V.
+    let our_pid = std::process::id() as i32;
+    let target = frontmost_pid().filter(|&p| p != our_pid);
+    state.set_target_pid(target);
 
-            crate::show_paste_confirm(app, state, x, y, char_count);
-
-            FsmState::Disarmed
+    if fresh {
+        // The content is already on the clipboard; bank it into history now
+        // (the poller would only get to it up to one tick later). Paste
+        // proceeds even if the insert fails — Cmd+V reads the clipboard, not
+        // the DB — and a failed insert leaves the clip unstamped so the
+        // poller retries it.
+        if let Err(e) = crate::record_clip(app, state, &content) {
+            crate::elog!("[pluks] try_fire: fresh clip record failed: {e}");
+        }
+    } else {
+        // Remembered write: long-press puts the most-recent clip back on
+        // the clipboard, and the poller must not re-record that as a fresh
+        // external copy.
+        if !state.write_clipboard_remembered(&content) {
+            crate::elog!("[pluks] try_fire: clipboard write failed");
+            let _ = app.emit(EVT_PASTE_SUPPRESSED, json!({ "reason": "clipboard_failed" }));
+            state.set_target_pid(None);
+            return FsmState::Disarmed;
         }
     }
+    if let Some(pid) = state.take_target_pid() {
+        activate_pid(pid);
+        thread::sleep(Duration::from_millis(POST_ACTIVATE_SLEEP_MS));
+    }
+    simulate_paste();
+
+    crate::show_paste_confirm(app, state, x, y, char_count);
+
+    FsmState::Disarmed
 }
 
 #[cfg(test)]
@@ -356,10 +406,10 @@ mod tests {
 
     #[test]
     fn fire_pastes_most_recent_clip_when_all_gates_pass() {
-        let d = decide_fire(true, false, false, Some(item("hello world")));
+        let d = decide_fire(true, false, false, None, None, Some(item("hello world")));
         assert_eq!(
             d,
-            FireDecision::Paste {
+            FireDecision::PasteRecent {
                 content: "hello world".into(),
                 char_count: 11,
             },
@@ -368,34 +418,130 @@ mod tests {
 
     #[test]
     fn fire_skips_when_disabled() {
-        let d = decide_fire(false, false, false, Some(item("x")));
+        let d = decide_fire(false, false, false, None, None, Some(item("x")));
         assert_eq!(d, FireDecision::Skip("disabled"));
     }
 
     #[test]
     fn fire_skips_when_history_panel_is_visible() {
-        let d = decide_fire(true, true, false, Some(item("x")));
+        let d = decide_fire(true, true, false, None, None, Some(item("x")));
         assert_eq!(d, FireDecision::Skip("panel_visible"));
     }
 
     #[test]
     fn fire_skips_when_focus_is_on_a_secure_field() {
-        let d = decide_fire(true, false, true, Some(item("secret")));
+        let d = decide_fire(true, false, true, None, None, Some(item("secret")));
         assert_eq!(d, FireDecision::Skip("secure_field"));
     }
 
     #[test]
     fn fire_skips_when_history_is_empty() {
-        let d = decide_fire(true, false, false, None);
+        let d = decide_fire(true, false, false, None, None, None);
         assert_eq!(d, FireDecision::Skip("empty_history"));
     }
 
     #[test]
     fn fire_counts_chars_not_bytes_for_unicode() {
-        let d = decide_fire(true, false, false, Some(item("café 🚀")));
+        let d = decide_fire(true, false, false, None, None, Some(item("café 🚀")));
         match d {
-            FireDecision::Paste { char_count, .. } => assert_eq!(char_count, 6),
-            _ => panic!("expected Paste"),
+            FireDecision::PasteRecent { char_count, .. } => assert_eq!(char_count, 6),
+            _ => panic!("expected PasteRecent"),
+        }
+    }
+
+    // ── Fresh-clipboard precedence (manual copy → immediate long-press) ──
+
+    #[test]
+    fn fresh_clipboard_wins_over_stale_db_top() {
+        // A manual copy the poller hasn't recorded yet: clipboard differs
+        // from the last clip Pluks wrote/recorded. The DB top row is stale.
+        let d = decide_fire(
+            true,
+            false,
+            false,
+            Some("just copied".into()),
+            Some("older clip"),
+            Some(item("older clip")),
+        );
+        assert_eq!(
+            d,
+            FireDecision::PasteFresh {
+                content: "just copied".into(),
+                char_count: 11,
+            },
+        );
+    }
+
+    #[test]
+    fn clipboard_matching_last_recorded_falls_back_to_history() {
+        // The clipboard still holds Pluks's own last write — that's an echo,
+        // not a fresh copy, so the DB most-recent is the right content.
+        let d = decide_fire(
+            true,
+            false,
+            false,
+            Some("top clip".into()),
+            Some("top clip"),
+            Some(item("top clip")),
+        );
+        assert_eq!(
+            d,
+            FireDecision::PasteRecent {
+                content: "top clip".into(),
+                char_count: 8,
+            },
+        );
+    }
+
+    #[test]
+    fn fresh_clipboard_with_no_last_recorded_is_fresh() {
+        // First copy after startup: nothing recorded yet, clipboard has text.
+        let d = decide_fire(true, false, false, Some("first".into()), None, None);
+        assert_eq!(
+            d,
+            FireDecision::PasteFresh {
+                content: "first".into(),
+                char_count: 5,
+            },
+        );
+    }
+
+    #[test]
+    fn fresh_clipboard_pastes_even_with_empty_history() {
+        let d = decide_fire(
+            true,
+            false,
+            false,
+            Some("only on clipboard".into()),
+            Some("something else"),
+            None,
+        );
+        assert!(matches!(d, FireDecision::PasteFresh { .. }));
+    }
+
+    #[test]
+    fn gates_still_suppress_a_fresh_clipboard() {
+        let fresh = || Some(String::from("just copied"));
+        assert_eq!(
+            decide_fire(false, false, false, fresh(), None, None),
+            FireDecision::Skip("disabled"),
+        );
+        assert_eq!(
+            decide_fire(true, true, false, fresh(), None, None),
+            FireDecision::Skip("panel_visible"),
+        );
+        assert_eq!(
+            decide_fire(true, false, true, fresh(), None, None),
+            FireDecision::Skip("secure_field"),
+        );
+    }
+
+    #[test]
+    fn fresh_clipboard_counts_chars_not_bytes() {
+        let d = decide_fire(true, false, false, Some("café 🚀".into()), None, None);
+        match d {
+            FireDecision::PasteFresh { char_count, .. } => assert_eq!(char_count, 6),
+            _ => panic!("expected PasteFresh"),
         }
     }
 }
