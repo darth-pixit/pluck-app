@@ -225,5 +225,21 @@
         btn.style.fontSize = "14px";
       }
     }
+
+    // Windows visitors also get the nav + hero CTAs retargeted at the MSI \u2014
+    // a Mac-labeled primary button is wrong for them. The data-attribute swap
+    // runs synchronously, before the async release fetch resolves, so the
+    // [data-dl-win] href pass in index.html picks these up too. The Mac
+    // card's own button (#dl-mac-card) is intentionally left alone.
+    if (cardId === "card-win") {
+      [document.getElementById("dl-mac"), document.querySelector("nav .nav-cta")].forEach((el, i) => {
+        if (!el) return;
+        el.removeAttribute("data-dl-mac");
+        el.setAttribute("data-dl-win", "");
+        const icon = el.querySelector(".apple-icon");
+        if (icon) icon.remove();
+        el.textContent = i === 0 ? "Download free for Windows (beta)" : "Download for Windows";
+      });
+    }
   })();
 })();

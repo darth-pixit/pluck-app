@@ -61,6 +61,33 @@ test.describe("Windows download card", () => {
     await expect(card.locator(".pill")).toHaveText(/beta/i);
   });
 
+  test("a Windows visitor gets the hero and nav CTAs retargeted at the MSI", async ({ page, browser }) => {
+    const ctx = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    });
+    const winPage = await ctx.newPage();
+    await winPage.route("**/api.github.com/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(RELEASE),
+      }),
+    );
+    await winPage.goto("/");
+    // Hero CTA: relabeled, retargeted at the MSI.
+    await expect(winPage.locator("#dl-mac")).toContainText(/windows/i);
+    await expect
+      .poll(() => winPage.locator("#dl-mac").getAttribute("href"))
+      .toContain("_x64_en-US.msi");
+    await expect(winPage.locator("nav .nav-cta")).toContainText(/windows/i);
+    // The Mac card's own button stays a Mac download.
+    await expect
+      .poll(() => winPage.locator("#dl-mac-card").getAttribute("href"))
+      .toContain("_universal.dmg");
+    await ctx.close();
+  });
+
   test("clicking the Windows download opens the email-gate modal", async ({ page }) => {
     await page.goto("/");
     // Neutralize the href so the post-capture state can't navigate away

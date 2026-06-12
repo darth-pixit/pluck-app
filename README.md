@@ -24,7 +24,14 @@
 - **Searchable history** — last 200 clips, kept locally.
 - **Local-first** — clipboard data never leaves your device.
 - **Anonymous, opt-out telemetry** — usage stats help us improve; turn it off in preferences.
-- **Cross-platform** — macOS, Windows, Linux.
+- **Cross-platform** — macOS, Windows (beta), Linux.
+
+> **Platform notes:** the macOS app is the most road-tested. The Windows 10/11
+> build is in **beta** — every release is automatically install-, launch-, and
+> capture-tested on real Windows machines in CI
+> ([`windows-smoke.yml`](./.github/workflows/windows-smoke.yml)), but it hasn't
+> had the Mac app's months of daily human use yet. Linux builds ship with each
+> release and are currently the least exercised.
 
 ## Repository layout
 
