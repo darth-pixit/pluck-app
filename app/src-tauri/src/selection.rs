@@ -37,7 +37,7 @@ const KEYCODE_A: i64 = 0;
 macro_rules! dlog {
     ($($arg:tt)*) => {
         #[cfg(debug_assertions)]
-        eprintln!($($arg)*);
+        crate::elog!($($arg)*);
     };
 }
 
@@ -765,7 +765,7 @@ mod mac_tap {
                 ctx as *mut c_void,
             );
             if port.is_null() {
-                eprintln!("[pluks] CGEventTapCreate failed — Input Monitoring permission missing?");
+                crate::elog!("[pluks] CGEventTapCreate failed — Input Monitoring permission missing?");
                 drop(Box::from_raw(ctx));
                 return;
             }
@@ -886,7 +886,7 @@ mod rdev_listener {
         };
 
         if let Err(e) = listen(cb) {
-            eprintln!("[pluks] rdev listen failed (Wayland or missing X server?): {:?}", e);
+            crate::elog!("[pluks] rdev listen failed (Wayland or missing X server?): {:?}", e);
         }
     }
 }

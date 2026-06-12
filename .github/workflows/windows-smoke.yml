@@ -159,13 +159,26 @@ jobs:
         env:
           PLUKS_POLL_DEBUG: "1"
         run: |
-          $proc = Start-Process $env:PLUKS_EXE -PassThru `
-                    -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log
+          # Launch via a batch file so stdout/stderr are REAL file handles.
+          # Start-Process -RedirectStandardError is a .NET pipe pumped by THIS
+          # pwsh process: when the step ends the pump dies, later app output is
+          # lost, and writes to the broken pipe fail (which eprintln! turned
+          # into an app-killing panic — fixed app-side too, but the harness
+          # shouldn't manufacture that environment in the first place).
+          "@echo off`r`n`"$env:PLUKS_EXE`" 1>> app-stdout.log 2>> app-stderr.log" |
+            Set-Content launch.cmd -Encoding ascii
+          Start-Process cmd -ArgumentList "/c", "launch.cmd"
+          Start-Sleep -Seconds 5
+          $proc = Get-Process -Name pluck -ErrorAction SilentlyContinue
+          if (-not $proc) {
+            Write-Host "--- stderr ---"; Get-Content app-stderr.log -ErrorAction SilentlyContinue
+            throw "pluck.exe not running 5s after launch"
+          }
           "PLUKS_PID=$($proc.Id)" >> $env:GITHUB_ENV
-          Start-Sleep -Seconds 30
+          Start-Sleep -Seconds 25
           if ($proc.HasExited) {
             Write-Host "--- stderr ---"; Get-Content app-stderr.log -ErrorAction SilentlyContinue
-            throw "Pluks exited within 30s, exit code $($proc.ExitCode)"
+            throw "Pluks exited within 30s"
           }
           Write-Host "Pluks alive after 30s (pid $($proc.Id))"
           Get-Content app-stderr.log -ErrorAction SilentlyContinue | Select-Object -First 20

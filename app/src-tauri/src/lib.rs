@@ -1,3 +1,19 @@
+/// Best-effort stderr diagnostics. `eprintln!` PANICS when the stderr write
+/// fails — fatal when stderr is a pipe whose reader has gone away. The Windows
+/// smoke harness proved this the hard way: its launch step's pipe pump died
+/// with the parent shell, the next poller heartbeat write panicked, the panic
+/// hook's own eprintln panicked in turn, and the whole app aborted without a
+/// trace. Real users can reproduce the same with any launcher that closes
+/// stderr. Every diagnostic in this crate goes through here so logging can
+/// never take the app down.
+#[macro_export]
+macro_rules! elog {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr().lock(), $($arg)*);
+    }};
+}
+
 mod history;
 mod paste;
 mod selection;
@@ -337,22 +353,22 @@ fn show_in_nudge_window(
     log_tag: &str,
 ) {
     let Some(win) = app.get_webview_window(WIN_NUDGE) else {
-        eprintln!("[pluks] {}: WIN_NUDGE not found", log_tag);
+        crate::elog!("[pluks] {}: WIN_NUDGE not found", log_tag);
         return;
     };
     let my_gen = state.nudge_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    eprintln!(
+    crate::elog!(
         "[pluks] {}: gen={} target=({:.1},{:.1}) size=({},{}) event={}",
         log_tag, my_gen, pos_x, pos_y, NUDGE_WIDTH, NUDGE_HEIGHT, event,
     );
     if let Err(e) = win.set_position(tauri::LogicalPosition::new(pos_x, pos_y)) {
-        eprintln!("[pluks] {}: set_position failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: set_position failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.set_size(tauri::LogicalSize::new(NUDGE_WIDTH, NUDGE_HEIGHT)) {
-        eprintln!("[pluks] {}: set_size failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: set_size failed: {:?}", log_tag, e);
     }
     if let Err(e) = win.show() {
-        eprintln!("[pluks] {}: show() failed: {:?}", log_tag, e);
+        crate::elog!("[pluks] {}: show() failed: {:?}", log_tag, e);
     }
     // CRITICAL: Pluks is an LSUIElement/Accessory app, so it is almost never
     // the active app when a nudge fires (the user is typing in some other
@@ -366,7 +382,7 @@ fn show_in_nudge_window(
     // (paste-confirm), and listeners in the nudge webview itself also
     // receive broadcasts.
     if let Err(e) = app.emit(event, &payload) {
-        eprintln!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
+        crate::elog!("[pluks] {}: emit({}) failed: {:?}", log_tag, event, e);
     }
 
     let app_for_hide = app.clone();
@@ -865,7 +881,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
         // this thread exists and what change token it baselined — without it
         // a silent capture stall is indistinguishable from a dead thread.
         let debug = std::env::var("PLUKS_POLL_DEBUG").is_ok();
-        eprintln!("[pluks] clipboard poller online, initial token {last_token:?}");
+        crate::elog!("[pluks] clipboard poller online, initial token {last_token:?}");
         let mut tick: u64 = 0;
 
         loop {
@@ -883,7 +899,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                 // frozen-token failure mode (e.g. GetClipboardSequenceNumber
                 // returning 0 without window-station access) is invisible to
                 // every other log line.
-                eprintln!("[pluks] poll heartbeat tick={tick} token={token:?} last={last_token:?}");
+                crate::elog!("[pluks] poll heartbeat tick={tick} token={token:?} last={last_token:?}");
             }
             let changed = match (token, last_token) {
                 (Some(t), Some(lt)) => t != lt,
@@ -893,7 +909,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                 continue;
             }
             if debug {
-                eprintln!("[pluks] poll: token changed {last_token:?} -> {token:?}");
+                crate::elog!("[pluks] poll: token changed {last_token:?} -> {token:?}");
             }
 
             // Privacy gate FIRST: if the clipboard is flagged concealed we never
@@ -901,7 +917,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             // or the live panel.
             let concealed = clipboard_is_concealed();
             if debug {
-                eprintln!("[pluks] poll: concealed={concealed}");
+                crate::elog!("[pluks] poll: concealed={concealed}");
             }
             let text = if concealed {
                 None
@@ -909,11 +925,11 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                 read_clipboard(&mut clip)
             };
             if debug {
-                eprintln!("[pluks] poll: text_len={:?}", text.as_ref().map(|t| t.len()));
+                crate::elog!("[pluks] poll: text_len={:?}", text.as_ref().map(|t| t.len()));
             }
             let visible = panel_visible(&app_handle);
             if debug {
-                eprintln!("[pluks] poll: panel_visible={visible}");
+                crate::elog!("[pluks] poll: panel_visible={visible}");
             }
 
             let outcome = decide_poll(
@@ -944,7 +960,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                     // the Windows smoke run that caught the panel_visible
                     // startup stall was undiagnosable without it.
                     if last_skip_reason != Some(reason) {
-                        eprintln!("[pluks] clipboard poll skip: {reason}");
+                        crate::elog!("[pluks] clipboard poll skip: {reason}");
                         last_skip_reason = Some(reason);
                     }
                     // Consume the token only for content-tied reasons so we
@@ -1014,7 +1030,7 @@ pub fn run() {
     // build is actually running — important for the v0.4.5 diagnostic
     // build that's being shipped to disambiguate the Tahoe 26.2 overlay
     // visibility bug.
-    eprintln!(
+    crate::elog!(
         "[pluks] starting v{} (overlay diagnostics enabled)",
         env!("CARGO_PKG_VERSION")
     );
@@ -1160,7 +1176,7 @@ pub fn run() {
                         }
                         TRAY_HISTORY => toggle_history_window(&app_handle, false),
                         TRAY_TEST_NUDGE => {
-                            eprintln!("[pluks] tray: TEST_NUDGE clicked");
+                            crate::elog!("[pluks] tray: TEST_NUDGE clicked");
                             show_nudge_impl(
                                 &app_handle,
                                 &state_ref,
@@ -1169,7 +1185,7 @@ pub fn run() {
                             );
                         }
                         TRAY_TEST_PASTE_CONFIRM => {
-                            eprintln!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
+                            crate::elog!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
                             let (cx, cy) = cursor_pos();
                             show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
                         }
@@ -1200,7 +1216,7 @@ pub fn run() {
                 })
                 .build(app);
             if let Err(e) = tray_result {
-                eprintln!("[pluks] tray icon creation failed (continuing without tray): {e}");
+                crate::elog!("[pluks] tray icon creation failed (continuing without tray): {e}");
             }
 
             // ── Global shortcuts ─────────────────────────────────────────
@@ -1216,7 +1232,7 @@ pub fn run() {
                             }
                         })
                 {
-                    eprintln!("[pluks] failed to register Cmd+Shift+V: {:?}", e);
+                    crate::elog!("[pluks] failed to register Cmd+Shift+V: {:?}", e);
                 }
 
                 // Cmd+Shift+Up / Down: navigate while the panel is visible.
@@ -1239,7 +1255,7 @@ pub fn run() {
                             }
                         },
                     ) {
-                        eprintln!("[pluks] failed to register {}: {:?}", combo, e);
+                        crate::elog!("[pluks] failed to register {}: {:?}", combo, e);
                     }
                 }
             }
@@ -1302,7 +1318,7 @@ pub fn run() {
                     show_history_window(&win, false);
                 }
             } else if let Some(win) = app.get_webview_window(WIN_HISTORY) {
-                eprintln!(
+                crate::elog!(
                     "[pluks] history window visible at startup: {:?} (forcing hidden)",
                     win.is_visible()
                 );
