@@ -12,6 +12,11 @@ export async function stubExternal(page: Page): Promise<void> {
   await page.route("https://*.ingest.sentry.io/**", (route) =>
     route.fulfill({ status: 200, body: "{}" }),
   );
+  // The Sentry SDK is a synchronous <head> script — unstubbed, a flaky CDN
+  // gates page parsing and blows test timeouts that look like regressions.
+  await page.route("**/browser.sentry-cdn.com/**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/javascript", body: "" }),
+  );
 }
 
 export async function routeRelease(page: Page, release: unknown): Promise<void> {

@@ -194,11 +194,17 @@ export async function initAnalytics(): Promise<void> {
   try {
     _settings = await invoke<Settings>("get_settings");
   } catch (e) {
-    // Settings command not yet available (e.g. dev rebuild); use safe defaults.
+    // Settings command unavailable (dev rebuild, transient IPC failure).
+    // Fail CLOSED: we can't know whether this user opted out, and the
+    // Rust-side get_settings never errors on a missing/corrupt file (it
+    // regenerates), so reaching this path means we know nothing — sending
+    // events with a fresh random id would both override a real user's
+    // opt-out and inject synthetic "new users" into PostHog (the smoke
+    // harness relies on the pre-seeded opt-out as its runtime kill).
     _settings = {
       anon_id: "anon-" + Math.random().toString(36).slice(2),
-      opt_out: false,
-      crash_opt_out: false,
+      opt_out: true,
+      crash_opt_out: true,
       analytics_first_seen_version: APP_VERSION,
       last_seen_version: APP_VERSION,
       enable_long_press_paste: true,

@@ -926,7 +926,16 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             let text = if concealed {
                 None
             } else {
-                read_clipboard(&mut clip)
+                // One bounded retry: `read_clipboard` flattens transient
+                // failures (another process briefly holding the clipboard
+                // open, delayed rendering) into the same `None` as a
+                // genuinely text-less clipboard, and a `None` outcome
+                // consumes the change token below — without the retry, one
+                // moment of contention permanently loses that copy.
+                read_clipboard(&mut clip).or_else(|| {
+                    thread::sleep(Duration::from_millis(50));
+                    read_clipboard(&mut clip)
+                })
             };
             if debug {
                 crate::elog!("[pluks] poll: text_len={:?}", text.as_ref().map(|t| t.len()));
@@ -945,18 +954,29 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             );
 
             match outcome {
-                PollOutcome::Record(t) => {
-                    if let Ok(item) = state.db().insert(&t) {
+                PollOutcome::Record(t) => match state.db().insert(&t) {
+                    Ok(item) => {
                         state.remember_clip(&item.content);
                         // `history-added`, not `new-selection`: this updates the
                         // panel list but must NOT run the affirmation/nudge
                         // pipeline or inflate the select-to-copy adoption
                         // counters — a manual copy isn't a select-to-copy.
                         let _ = app_handle.emit(EVT_HISTORY_ADDED, &item);
+                        last_token = token;
+                        last_skip_reason = None;
                     }
-                    last_token = token;
-                    last_skip_reason = None;
-                }
+                    Err(e) => {
+                        // Leave the token unconsumed so the next tick retries
+                        // (SQLITE_BUSY from a concurrent reader, transient
+                        // IOERR are recoverable); dedupe the log line like a
+                        // skip reason so a persistent failure (disk full)
+                        // doesn't spam stderr twice a second.
+                        if last_skip_reason != Some("db_insert_failed") {
+                            crate::elog!("[pluks] history insert failed (will retry): {e}");
+                            last_skip_reason = Some("db_insert_failed");
+                        }
+                    }
+                },
                 PollOutcome::Skip(reason) => {
                     // Log skip-state transitions (not every tick — transient
                     // reasons re-fire until the block clears). This is the

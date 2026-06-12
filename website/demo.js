@@ -208,10 +208,14 @@
   (function highlightPlatformCard() {
     const ua = navigator.userAgent.toLowerCase();
     let cardId;
-    if (/iphone|ipad|ipod/.test(ua)) {
-      // iOS UAs contain "like Mac OS X" — without this guard iPhones get the
-      // Mac card highlighted and a .dmg recommended. No mobile build exists,
-      // so highlight nothing.
+    const isIosLike =
+      /iphone|ipad|ipod/.test(ua) ||
+      // iPadOS 13+ Safari defaults to a DESKTOP UA ("Macintosh; Intel Mac OS
+      // X") with no "ipad" token; multi-touch on a "Mac" is the standard tell.
+      (/macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    if (isIosLike) {
+      // No mobile build exists — recommending a .dmg to an iPhone/iPad is
+      // worse than highlighting nothing.
       cardId = null;
     } else if (ua.includes("mac os x") || ua.includes("macintosh")) {
       cardId = "card-mac";
