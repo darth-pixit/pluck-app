@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers";
 
 test.describe("Interactive demo", () => {
   test("selecting demo text shows the 'Snagged!' toast", async ({ page, context }) => {

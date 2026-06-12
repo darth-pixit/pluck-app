@@ -903,10 +903,27 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             .unwrap_or(false);
         crate::elog!("[pluks] clipboard poller online, initial token {last_token:?}");
         let mut tick: u64 = 0;
+        // Clip whose DB insert failed, awaiting retry — decoupled from the
+        // clipboard token so no later skip can consume its way past it.
+        let mut pending_insert: Option<String> = None;
 
         loop {
             thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
             tick += 1;
+
+            // Retry a previously failed insert before looking at the
+            // clipboard at all: the text was already read and approved by
+            // the privacy gate on the tick that captured it.
+            if let Some(t) = pending_insert.take() {
+                match state.db().insert(&t) {
+                    Ok(item) => {
+                        state.remember_clip(&item.content);
+                        let _ = app_handle.emit(EVT_HISTORY_ADDED, &item);
+                        last_skip_reason = None;
+                    }
+                    Err(_) => pending_insert = Some(t),
+                }
+            }
 
             // Cheap change gate: when the platform exposes a sequence number
             // and it hasn't advanced, nothing was copied — skip the expensive
@@ -935,7 +952,7 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
             // Privacy gate FIRST: if the clipboard is flagged concealed we never
             // read the text, so a copied password never enters a String, the DB,
             // or the live panel.
-            let concealed = clipboard_is_concealed();
+            let mut concealed = clipboard_is_concealed();
             if debug {
                 crate::elog!("[pluks] poll: concealed={concealed}");
             }
@@ -949,8 +966,26 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                 // consumes the change token below — without the retry, one
                 // moment of contention permanently loses that copy.
                 read_clipboard(&mut clip).or_else(|| {
+                    // Only on platforms WITH a change token: on Linux
+                    // `changed` is always true, so the next 500ms tick
+                    // retries naturally — sleeping here would add a 50ms nap
+                    // and a doubled read to every tick a non-text clip
+                    // (screenshot, file) sits on the clipboard.
+                    if token.is_none() {
+                        return None;
+                    }
                     thread::sleep(Duration::from_millis(50));
-                    read_clipboard(&mut clip)
+                    // Re-run the privacy gate before the second read: a
+                    // failed first read means some process was mid-write —
+                    // plausibly a password manager. Reading under the stale
+                    // pre-sleep verdict would capture a concealed secret
+                    // written during the nap.
+                    concealed = clipboard_is_concealed();
+                    if concealed {
+                        None
+                    } else {
+                        read_clipboard(&mut clip)
+                    }
                 })
             };
             if debug {
@@ -980,15 +1015,21 @@ fn start_clipboard_poller(state: Arc<AppState>, app_handle: AppHandle) {
                         last_skip_reason = None;
                     }
                     Err(e) => {
-                        // Leave the token unconsumed so the next tick retries
-                        // (SQLITE_BUSY from a concurrent reader, transient
-                        // IOERR are recoverable); dedupe the log line like a
-                        // skip reason so a persistent failure (disk full)
-                        // doesn't spam stderr twice a second.
+                        // Stash the approved text and retry the INSERT next
+                        // tick (SQLITE_BUSY from a concurrent reader and
+                        // transient IOERR are recoverable). The token IS
+                        // consumed: the clip is preserved in the stash, and
+                        // tying the retry to an unconsumed token would let an
+                        // unrelated Skip("empty") on the next tick consume it
+                        // and silently abandon the clip. Dedupe the log line
+                        // so a persistent failure (disk full) doesn't spam
+                        // stderr twice a second.
                         if last_skip_reason != Some("db_insert_failed") {
                             crate::elog!("[pluks] history insert failed (will retry): {e}");
                             last_skip_reason = Some("db_insert_failed");
                         }
+                        pending_insert = Some(t);
+                        last_token = token;
                     }
                 },
                 PollOutcome::Skip(reason) => {

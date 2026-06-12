@@ -117,6 +117,9 @@ export interface Settings {
 }
 
 let _settings: Settings | null = null;
+// True when _settings was loaded from disk via get_settings; false when it's
+// the fabricated fail-closed fallback, which must never be persisted.
+let _settingsFromDisk = false;
 let _initialized = false;
 let _osPlatform = "unknown";
 let _osVersion = "unknown";
@@ -193,6 +196,7 @@ export async function initAnalytics(): Promise<void> {
 
   try {
     _settings = await invoke<Settings>("get_settings");
+    _settingsFromDisk = true;
   } catch (e) {
     // Settings command unavailable (dev rebuild, transient IPC failure).
     // Fail CLOSED: we can't know whether this user opted out, and the
@@ -201,8 +205,12 @@ export async function initAnalytics(): Promise<void> {
     // events with a fresh random id would both override a real user's
     // opt-out and inject synthetic "new users" into PostHog (the smoke
     // harness relies on the pre-seeded opt-out as its runtime kill).
+    // The constant sentinel id (not a random one) means that if any future
+    // code path ever sends despite opt_out, every such event collapses
+    // into one identifiable "user" the truth-layer filters can exclude.
+    _settingsFromDisk = false;
     _settings = {
-      anon_id: "anon-" + Math.random().toString(36).slice(2),
+      anon_id: "anon-ipc-unavailable",
       opt_out: true,
       crash_opt_out: true,
       analytics_first_seen_version: APP_VERSION,
@@ -303,13 +311,36 @@ export async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>)
   }
 }
 
+/**
+ * Persist `_settings`, but never the fabricated fail-closed fallback:
+ * `set_settings` is a blind whole-record write, so persisting the fallback
+ * would rotate the user's real anon_id and overwrite their actual opt-out
+ * choices on disk. When the in-memory record didn't come from disk, recover
+ * the real record first, re-apply the caller's mutation to it, and persist
+ * that; if IPC is still down, the change stays in-memory only.
+ */
+async function persistSettings(mutate: (s: Settings) => void): Promise<void> {
+  if (!_settings) return;
+  if (!_settingsFromDisk) {
+    try {
+      const fresh = await invoke<Settings>("get_settings");
+      mutate(fresh);
+      _settings = fresh;
+      _settingsFromDisk = true;
+    } catch {
+      return;
+    }
+  }
+  try { await invoke("set_settings", { settings: _settings }); } catch {}
+}
+
 export async function setOptOut(optOut: boolean): Promise<void> {
   if (!_settings) return;
   if (optOut && !_settings.opt_out) track("analytics_opted_out", {});
   _settings.opt_out = optOut;
   // No SDK to toggle — sendEvent() checks _settings.opt_out at send time.
   if (!optOut) track("analytics_opted_in", {});
-  try { await invoke("set_settings", { settings: _settings }); } catch {}
+  await persistSettings((s) => { s.opt_out = optOut; });
 }
 
 export async function setCrashOptOut(optOut: boolean): Promise<void> {
@@ -317,7 +348,7 @@ export async function setCrashOptOut(optOut: boolean): Promise<void> {
   if (optOut && !_settings.crash_opt_out) track("crash_report_opted_out", {});
   _settings.crash_opt_out = optOut;
   if (!optOut) track("crash_report_opted_in", {});
-  try { await invoke("set_settings", { settings: _settings }); } catch {}
+  await persistSettings((s) => { s.crash_opt_out = optOut; });
 }
 
 export async function setLongPressEnabled(enabled: boolean): Promise<void> {
@@ -325,7 +356,7 @@ export async function setLongPressEnabled(enabled: boolean): Promise<void> {
   if (_settings.enable_long_press_paste === enabled) return;
   _settings.enable_long_press_paste = enabled;
   track("long_press_paste_toggled", { enabled });
-  try { await invoke("set_settings", { settings: _settings }); } catch {}
+  await persistSettings((s) => { s.enable_long_press_paste = enabled; });
 }
 
 export async function setShowNudges(enabled: boolean): Promise<void> {
@@ -335,7 +366,7 @@ export async function setShowNudges(enabled: boolean): Promise<void> {
   // No telemetry event — we don't want a schema bump just for this; the
   // setting is small and the analytics surface is already busy. Adding
   // one later is straightforward if we ever want the funnel.
-  try { await invoke("set_settings", { settings: _settings }); } catch {}
+  await persistSettings((s) => { s.show_nudges = enabled; });
 }
 
 /**

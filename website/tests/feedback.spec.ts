@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers";
 
 test.describe("Feedback widget", () => {
   test.beforeEach(async ({ page }) => {

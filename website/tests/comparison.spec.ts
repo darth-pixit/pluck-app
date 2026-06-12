@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./helpers";
 
 test.describe("Comparison widget", () => {
   test("renders the section with Pluks and all five competitors", async ({ page }) => {
