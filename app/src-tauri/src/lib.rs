@@ -300,6 +300,17 @@ fn check_accessibility() -> bool {
     ax_is_trusted()
 }
 
+/// Tear down the single-instance socket/mutex right before a self-restart.
+/// `relaunch()` spawns the replacement while this process is still alive and
+/// listening — without this, the new process connects, is told "already
+/// running", and exits, leaving the user with no app at all after an update
+/// install or tray-quit relaunch (v0.7.1).
+#[tauri::command]
+fn prepare_relaunch(app: AppHandle) {
+    crate::elog!("[pluks] prepare_relaunch: releasing single-instance guard");
+    tauri_plugin_single_instance::destroy(&app);
+}
+
 /// Position the dedicated nudge window near the cursor and surface a
 /// `nudge-show` event to its webview so the React component renders
 /// the appropriate copy. Re-firing while a previous nudge is still
@@ -619,6 +630,23 @@ fn configure_overlay_window<R: Runtime>(window: &WebviewWindow<R>, needs_key: bo
 
 #[cfg(target_os = "macos")]
 fn order_front_regardless<R: Runtime>(window: &WebviewWindow<R>, make_key: bool) {
+    // AppKit window ordering is main-thread-only, but callers reach this from
+    // all over: tray/menu events (main), the paste processor thread
+    // (show_paste_confirm after a long-press), the show_nudge command, and
+    // the single-instance second-launch handler (socket-listener task — the
+    // v0.7.1 macOS crash). Marshal HERE so no caller, present or future, can
+    // send to AppKit off-main.
+    let win = window.clone();
+    let dispatched = window
+        .app_handle()
+        .run_on_main_thread(move || order_front_regardless_main(&win, make_key));
+    if dispatched.is_err() {
+        crate::elog!("[pluks] order_front_regardless: event loop unavailable");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn order_front_regardless_main<R: Runtime>(window: &WebviewWindow<R>, make_key: bool) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -1256,8 +1284,20 @@ pub fn run() {
         // record every clip into the same pluck.db).
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             crate::elog!("[pluks] second launch detected — showing history panel");
-            if let Some(win) = app.get_webview_window(WIN_HISTORY) {
-                show_history_window(&win, false);
+            // The plugin delivers this callback on its socket-listener task
+            // (Unix) / WndProc thread (Windows) — NOT the main thread, and the
+            // window work ends in main-thread-only AppKit sends (the v0.7.1
+            // macOS crash). order_front_regardless marshals itself now; run
+            // the whole sequence on the main thread anyway so show/center/
+            // focus land in order.
+            let app2 = app.clone();
+            let dispatched = app.run_on_main_thread(move || {
+                if let Some(win) = app2.get_webview_window(WIN_HISTORY) {
+                    show_history_window(&win, false);
+                }
+            });
+            if dispatched.is_err() {
+                crate::elog!("[pluks] second-launch handler: event loop unavailable");
             }
         }))
         // The MacosLauncher arg only takes effect on macOS — on Windows the
@@ -1459,6 +1499,7 @@ pub fn run() {
             clear_history,
             check_accessibility,
             check_input_monitoring,
+            prepare_relaunch,
             open_accessibility_settings,
             open_input_monitoring_settings,
             open_support_email,

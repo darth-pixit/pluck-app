@@ -20,7 +20,26 @@
 import { listen } from "@tauri-apps/api/event";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { track } from "./analytics";
+import { safeInvoke, track } from "./analytics";
+
+/**
+ * Release the single-instance guard before any install/relaunch path.
+ * The replacement process starts while this one is still alive — if the
+ * guard's socket/mutex is still held, the new process is told "already
+ * running" and exits, leaving the user with no app after an update
+ * (v0.7.1 on macOS). Trade-off: if the install then fails, this session
+ * runs unguarded until its next restart — acceptable, since the guard
+ * exists to stop accidental duplicate pipelines, not to be a hard lock.
+ */
+async function releaseSingleInstanceGuard(): Promise<void> {
+  try {
+    // safeInvoke reports the failure to Sentry/PostHog; still swallow it —
+    // a failed guard release must never block the install itself.
+    await safeInvoke("prepare_relaunch");
+  } catch (err) {
+    console.warn("[pluks updater] prepare_relaunch failed:", err);
+  }
+}
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // every 6h
 const INITIAL_CHECK_DELAY_MS = 5_000;           // wait 5 s after boot
@@ -144,6 +163,7 @@ export async function installStagedUpdate(): Promise<void> {
   setStatus({ phase: "installing" });
   track("update_install_started", { version });
   try {
+    await releaseSingleInstanceGuard();
     await staged.install();
     await relaunch();
   } catch (err) {
@@ -193,6 +213,9 @@ export function startUpdater(): void {
     if (staged && status.phase === "ready") {
       try {
         track("update_install_on_quit", { version: staged.version });
+        // On Windows the MSI installer restarts the app itself, racing the
+        // not-yet-exited current process the same way relaunch() does.
+        await releaseSingleInstanceGuard();
         await staged.install();
       } catch (err) {
         console.warn("[pluks updater] install-on-quit failed:", err);

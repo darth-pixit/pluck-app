@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.2] - 2026-06-12
+
+Emergency fix for v0.7.1 on macOS.
+
+### Fixed
+- **macOS: the app crashed whenever a second launch occurred.** v0.7.1's
+  single-instance guard surfaces the history panel when you launch Pluks
+  while it's already running — but the plugin delivers that callback on a
+  background thread, and the panel-surfacing path ends in main-thread-only
+  AppKit calls (`orderFrontRegardless`, `makeKeyAndOrderFront:`). Every
+  second launch (login autostart vs. manual open, updater relaunch) crashed
+  the *running* instance. `order_front_regardless` now marshals itself onto
+  the main thread, protecting every caller — including the long-press
+  paste-confirm pill, which fired the same off-main AppKit calls from the
+  paste processor thread.
+- **Updating or relaunching could leave no app running at all.** The
+  relaunch spawns the replacement process while the old one is still alive
+  and holding the single-instance guard, so the new process was told
+  "already running" and exited — then the old one quit. The guard is now
+  released (`prepare_relaunch`) before any install/relaunch path.
+
 ## [v0.7.1] - 2026-06-12
 
 Hardening follow-up to the launch release. The first three fixes were merged
