@@ -1104,6 +1104,139 @@ fn start_manual_copy_processor(
 // ── App entry point ────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Build the tray: menu items, menu, icon, shell registration. Called from
+/// setup and again by `spawn_tray_retry` when registration failed.
+fn setup_tray(app: &AppHandle, state: Arc<AppState>) -> tauri::Result<()> {
+    let toggle_item = MenuItem::with_id(app, TRAY_TOGGLE, TRAY_LABEL_DISABLE, true, None::<&str>)?;
+    let history_label = if cfg!(target_os = "macos") {
+        "Show / Hide History (⌘⇧V)"
+    } else {
+        "Show / Hide History (Ctrl+Shift+V)"
+    };
+    let history_item = MenuItem::with_id(app, TRAY_HISTORY, history_label, true, None::<&str>)?;
+    // Diagnostic actions (v0.4.5). Bypass the capture / long-press
+    // pipelines and fire the overlay show paths directly so the user
+    // can verify whether the pill actually renders — independently
+    // of whether a real selection / hold made it through capture.
+    // "Test Paste Confirm" is the on-demand way to verify the
+    // silent-paste pill composites over fullscreen apps without
+    // having to trigger a real long-press from inside one.
+    let test_nudge_item =
+        MenuItem::with_id(app, TRAY_TEST_NUDGE, "Test Nudge (debug)", true, None::<&str>)?;
+    let test_paste_confirm_item = MenuItem::with_id(
+        app,
+        TRAY_TEST_PASTE_CONFIRM,
+        "Test Paste Confirm (debug)",
+        true,
+        None::<&str>,
+    )?;
+    let quit_item = MenuItem::with_id(app, TRAY_QUIT, "Quit Pluks", true, None::<&str>)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &toggle_item,
+            &history_item,
+            &test_nudge_item,
+            &test_paste_confirm_item,
+            &quit_item,
+        ],
+    )?;
+
+    // Tray registration talks to the shell (`Shell_NotifyIcon` on
+    // Windows, StatusNotifier on Linux) and can fail when no shell is
+    // available — explorer.exe crashing/restarting, headless CI sessions.
+    let mut builder = TrayIconBuilder::new();
+    // No unwrap: a missing default window icon must degrade to an
+    // icon-less tray, not a setup panic.
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Pluks — select to copy")
+        .on_menu_event({
+            let app_handle = app.clone();
+            let state_ref = state.clone();
+            let toggle_item = toggle_item.clone();
+            move |_tray, event| match event.id().as_ref() {
+                TRAY_TOGGLE => {
+                    let next = !state_ref.watcher_enabled();
+                    state_ref.set_watcher(next);
+                    let _ = toggle_item.set_text(if next {
+                        TRAY_LABEL_DISABLE
+                    } else {
+                        TRAY_LABEL_ENABLE
+                    });
+                }
+                TRAY_HISTORY => toggle_history_window(&app_handle, false),
+                TRAY_TEST_NUDGE => {
+                    crate::elog!("[pluks] tray: TEST_NUDGE clicked");
+                    show_nudge_impl(&app_handle, &state_ref, "affirmation", "✦ Test nudge");
+                }
+                TRAY_TEST_PASTE_CONFIRM => {
+                    crate::elog!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
+                    let (cx, cy) = cursor_pos();
+                    show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
+                }
+                TRAY_QUIT => {
+                    // Give the frontend a chance to install a staged
+                    // update before we tear down. The listener has up
+                    // to 800ms to call install_update + relaunch; if
+                    // none is staged, it no-ops and we exit normally.
+                    let _ = app_handle.emit("app-quit-requested", ());
+                    let h = app_handle.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(800));
+                        h.exit(0);
+                    });
+                }
+                _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_history_window(tray.app_handle(), false);
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// Bounded background retry for tray creation. Without the tray the app has
+/// no quit path and no visible presence; the most common failure is autostart
+/// winning the race against explorer.exe at login, which heals within
+/// seconds. Backoff: 5s, 10s, 20s, 40s, 80s, then give up (the app still
+/// captures; a relaunch surfaces the panel via the single-instance handler).
+fn spawn_tray_retry(app: AppHandle, state: Arc<AppState>, attempt: u32) {
+    const MAX_ATTEMPTS: u32 = 5;
+    if attempt > MAX_ATTEMPTS {
+        crate::elog!("[pluks] tray retry: giving up after {MAX_ATTEMPTS} attempts");
+        return;
+    }
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5u64 << (attempt - 1)));
+        let app2 = app.clone();
+        let state2 = state.clone();
+        // Tray/menu objects must be created on the event-loop thread.
+        let dispatched = app.run_on_main_thread(move || match setup_tray(&app2, state2.clone()) {
+            Ok(()) => crate::elog!("[pluks] tray created on retry {attempt}"),
+            Err(e) => {
+                crate::elog!("[pluks] tray retry {attempt} failed: {e}");
+                spawn_tray_retry(app2.clone(), state2, attempt + 1);
+            }
+        });
+        if dispatched.is_err() {
+            crate::elog!("[pluks] tray retry: event loop unavailable, giving up");
+        }
+    });
+}
+
 pub fn run() {
     // Surface the version in Console.app so the user can confirm which
     // build is actually running — important for the v0.4.5 diagnostic
@@ -1115,6 +1248,18 @@ pub fn run() {
     );
 
     tauri::Builder::default()
+        // Single-instance must be the FIRST plugin so the duplicate-launch
+        // check runs before any other initialization. A second launch is a
+        // user looking for the app — e.g. the tray never appeared after a
+        // failed shell registration — so surface the panel instead of
+        // spawning a duplicate capture pipeline (two pollers would double-
+        // record every clip into the same pluck.db).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            crate::elog!("[pluks] second launch detected — showing history panel");
+            if let Some(win) = app.get_webview_window(WIN_HISTORY) {
+                show_history_window(&win, false);
+            }
+        }))
         // The MacosLauncher arg only takes effect on macOS — on Windows the
         // plugin writes a registry Run entry, on Linux it drops a .desktop
         // autostart file. Same call works cross-platform; only the macOS
@@ -1183,130 +1328,14 @@ pub fn run() {
             // ── Tray ─────────────────────────────────────────────────────
             // The ENTIRE tray block — menu items, menu, icon, registration —
             // is fallible-but-not-fatal: menu construction can fail in the
-            // same shell-less/display-less situations as Shell_NotifyIcon
-            // (the original motivation below), and a missing tray must never
-            // take clipboard capture and the global shortcut down with it.
-            let tray_result = (|| -> tauri::Result<()> {
-            let toggle_item =
-                MenuItem::with_id(app, TRAY_TOGGLE, TRAY_LABEL_DISABLE, true, None::<&str>)?;
-            let history_label = if cfg!(target_os = "macos") {
-                "Show / Hide History (⌘⇧V)"
-            } else {
-                "Show / Hide History (Ctrl+Shift+V)"
-            };
-            let history_item = MenuItem::with_id(
-                app,
-                TRAY_HISTORY,
-                history_label,
-                true,
-                None::<&str>,
-            )?;
-            // Diagnostic actions (v0.4.5). Bypass the capture / long-press
-            // pipelines and fire the overlay show paths directly so the user
-            // can verify whether the pill actually renders — independently
-            // of whether a real selection / hold made it through capture.
-            // "Test Paste Confirm" is the on-demand way to verify the
-            // silent-paste pill composites over fullscreen apps without
-            // having to trigger a real long-press from inside one.
-            let test_nudge_item = MenuItem::with_id(
-                app,
-                TRAY_TEST_NUDGE,
-                "Test Nudge (debug)",
-                true,
-                None::<&str>,
-            )?;
-            let test_paste_confirm_item = MenuItem::with_id(
-                app,
-                TRAY_TEST_PASTE_CONFIRM,
-                "Test Paste Confirm (debug)",
-                true,
-                None::<&str>,
-            )?;
-            let quit_item = MenuItem::with_id(app, TRAY_QUIT, "Quit Pluks", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[
-                    &toggle_item,
-                    &history_item,
-                    &test_nudge_item,
-                    &test_paste_confirm_item,
-                    &quit_item,
-                ],
-            )?;
-
-            // Tray registration talks to the shell (`Shell_NotifyIcon` on
-            // Windows, StatusNotifier on Linux) and can fail when no shell is
-            // available — explorer.exe crashing/restarting, headless CI
-            // sessions.
-            let mut builder = TrayIconBuilder::new();
-            // No unwrap: a missing default window icon must degrade to an
-            // icon-less tray, not a setup panic that the closure can't catch.
-            if let Some(icon) = app.default_window_icon() {
-                builder = builder.icon(icon.clone());
-            }
-            builder
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .tooltip("Pluks — select to copy")
-                .on_menu_event({
-                    let app_handle = app.handle().clone();
-                    let state_ref = state.clone();
-                    let toggle_item = toggle_item.clone();
-                    move |_tray, event| match event.id().as_ref() {
-                        TRAY_TOGGLE => {
-                            let next = !state_ref.watcher_enabled();
-                            state_ref.set_watcher(next);
-                            let _ = toggle_item.set_text(if next {
-                                TRAY_LABEL_DISABLE
-                            } else {
-                                TRAY_LABEL_ENABLE
-                            });
-                        }
-                        TRAY_HISTORY => toggle_history_window(&app_handle, false),
-                        TRAY_TEST_NUDGE => {
-                            crate::elog!("[pluks] tray: TEST_NUDGE clicked");
-                            show_nudge_impl(
-                                &app_handle,
-                                &state_ref,
-                                "affirmation",
-                                "✦ Test nudge",
-                            );
-                        }
-                        TRAY_TEST_PASTE_CONFIRM => {
-                            crate::elog!("[pluks] tray: TEST_PASTE_CONFIRM clicked");
-                            let (cx, cy) = cursor_pos();
-                            show_paste_confirm(&app_handle, &state_ref, cx, cy, 42);
-                        }
-                        TRAY_QUIT => {
-                            // Give the frontend a chance to install a staged
-                            // update before we tear down. The listener has up
-                            // to 800ms to call install_update + relaunch; if
-                            // none is staged, it no-ops and we exit normally.
-                            let _ = app_handle.emit("app-quit-requested", ());
-                            let h = app_handle.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(Duration::from_millis(800));
-                                h.exit(0);
-                            });
-                        }
-                        _ => {}
-                    }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        toggle_history_window(tray.app_handle(), false);
-                    }
-                })
-                .build(app)?;
-            Ok(())
-            })();
-            if let Err(e) = tray_result {
+            // same shell-less/display-less situations as Shell_NotifyIcon,
+            // and a missing tray must never take clipboard capture and the
+            // global shortcut down with it. On failure a bounded background
+            // retry keeps trying — the common real-world cause is autostart
+            // racing explorer.exe at login, which resolves within seconds.
+            if let Err(e) = setup_tray(&app.handle().clone(), state.clone()) {
                 crate::elog!("[pluks] tray setup failed (continuing without tray): {e}");
+                spawn_tray_retry(app.handle().clone(), state.clone(), 1);
             }
 
             // ── Global shortcuts ─────────────────────────────────────────
