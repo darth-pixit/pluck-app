@@ -68,7 +68,7 @@ async function hogql(query) {
 async function fetchMetrics() {
   console.log('Querying PostHog…');
 
-  const [traffic, product, usage, platforms, surfaces, smartPaste, dau] = await Promise.all([
+  const [traffic, product, usage, platforms, surfaces, smartPaste, dau, website] = await Promise.all([
 
     hogql(`
       SELECT
@@ -164,9 +164,24 @@ async function fetchMetrics() {
       )
     `),
 
+    hogql(`
+      SELECT
+        event,
+        countIf(toDate(timestamp) = today())     AS today,
+        countIf(toDate(timestamp) = yesterday())  AS yesterday
+      FROM events
+      WHERE event IN (
+        '$pageview','download_clicked','download_modal_opened',
+        'download_form_submitted','feedback_submitted'
+      )
+        AND timestamp >= now() - INTERVAL 2 DAY
+        AND ${REAL_TRAFFIC}
+      GROUP BY event
+    `),
+
   ]);
 
-  return { traffic, product, usage, platforms, surfaces, smartPaste, dau };
+  return { traffic, product, usage, platforms, surfaces, smartPaste, dau, website };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -188,11 +203,17 @@ function rowFromData(rows, eventName) {
 // ── HTML email template ───────────────────────────────────────────────────────
 
 function buildHtml(metrics) {
-  const { traffic, product, usage, platforms, surfaces, smartPaste, dau } = metrics;
+  const { traffic, product, usage, platforms, surfaces, smartPaste, dau, website } = metrics;
 
   const date = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
   });
+
+  const pageviews      = rowFromData(website, '$pageview');
+  const dlClicked      = rowFromData(website, 'download_clicked');
+  const dlModal        = rowFromData(website, 'download_modal_opened');
+  const dlSubmitted    = rowFromData(website, 'download_form_submitted');
+  const feedbackSent   = rowFromData(website, 'feedback_submitted');
 
   const launches   = rowFromData(traffic, 'app_launched');
   const installs   = rowFromData(traffic, 'app_installed');
@@ -391,6 +412,34 @@ function buildHtml(metrics) {
       ${((selections.today / (selections.today + capFails.today)) * 100).toFixed(1)}%
     </span>
     <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(capFails.today)} failed)</span>
+  </div>` : ''}
+
+  <!-- ── Website ── -->
+  ${sectionHeader('🌍 Website')}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #222;border-radius:10px;border-collapse:collapse;overflow:hidden;">
+    <thead>
+      <tr style="border-bottom:1px solid #222;">
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:left;text-transform:uppercase;letter-spacing:1px;">Event</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Today</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Yesterday</th>
+        <th style="padding:10px 16px;font-size:11px;color:#6b7280;font-weight:600;text-align:right;text-transform:uppercase;letter-spacing:1px;">Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRow('Page views', pageviews.today, pageviews.yesterday)}
+      ${tableRow('Download button clicked', dlClicked.today, dlClicked.yesterday)}
+      ${tableRow('Download modal opened', dlModal.today, dlModal.yesterday)}
+      ${tableRow('Download form submitted', dlSubmitted.today, dlSubmitted.yesterday)}
+      ${tableRow('Feedback submitted', feedbackSent.today, feedbackSent.yesterday)}
+    </tbody>
+  </table>
+  ${(dlModal.today > 0) ? `
+  <div style="background:#111;border:1px solid #222;border-radius:10px;padding:14px 16px;margin-top:12px;">
+    <span style="font-size:13px;color:#9ca3af;">Modal → submit conversion today:&nbsp;</span>
+    <span style="font-size:14px;font-weight:700;color:${((dlSubmitted.today / dlModal.today) * 100) >= 20 ? '#10b981' : '#f59e0b'};">
+      ${((dlSubmitted.today / dlModal.today) * 100).toFixed(1)}%
+    </span>
+    <span style="font-size:12px;color:#4b5563;margin-left:8px;">(${num(dlSubmitted.today)} of ${num(dlModal.today)} opens)</span>
   </div>` : ''}
 
   <!-- ── Platforms ── -->
