@@ -55,6 +55,60 @@ describe("detect()", () => {
       expect(np.transform("")).toBe("https://example.com/path");
     });
 
+    describe("Clean action (strip tracking params)", () => {
+      it("removes utm_* but keeps functional params", () => {
+        const d = detect(
+          "https://example.com/p?utm_source=news&id=42&utm_medium=email"
+        )!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        expect(clean.transform("")).toBe("https://example.com/p?id=42");
+      });
+
+      it("removes click-ID trackers (fbclid, gclid, igshid, msclkid)", () => {
+        const d = detect(
+          "https://shop.example.com/item?fbclid=AbC&gclid=xyz&igshid=1&msclkid=q&color=red"
+        )!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        expect(clean.transform("")).toBe("https://shop.example.com/item?color=red");
+      });
+
+      it("matches tracking params case-insensitively", () => {
+        const d = detect("https://example.com/?UTM_Source=x&Keep=1")!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        expect(clean.transform("")).toBe("https://example.com/?Keep=1");
+      });
+
+      it("preserves the #hash while dropping trackers", () => {
+        const d = detect("https://example.com/p?gclid=z&q=hi#section")!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        expect(clean.transform("")).toBe("https://example.com/p?q=hi#section");
+      });
+
+      it("collapses to a bare URL when only trackers were present", () => {
+        const d = detect("https://example.com/page?utm_campaign=spring")!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        expect(clean.transform("")).toBe("https://example.com/page");
+      });
+
+      it("is not offered when the URL has no tracking params", () => {
+        const d = detect("https://example.com/path?id=1#h")!;
+        expect(d.actions.find((a) => a.label === "Clean")).toBeUndefined();
+      });
+
+      it("is not offered for a param-less URL", () => {
+        const d = detect("https://example.com/path")!;
+        expect(d.actions.find((a) => a.label === "Clean")).toBeUndefined();
+      });
+
+      it("Clean differs from No params by keeping functional query", () => {
+        const d = detect("https://example.com/p?utm_source=x&id=9")!;
+        const clean = d.actions.find((a) => a.label === "Clean")!;
+        const np = d.actions.find((a) => a.label === "No params")!;
+        expect(clean.transform("")).toBe("https://example.com/p?id=9");
+        expect(np.transform("")).toBe("https://example.com/p");
+      });
+    });
+
     it("normalizes www-prefix URLs to https", () => {
       const d = detect("www.example.com/foo")!;
       const md = d.actions.find((a) => a.label === "Markdown")!;
