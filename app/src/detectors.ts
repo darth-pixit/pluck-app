@@ -78,28 +78,68 @@ function detectJson(trimmed: string): Detection | null {
   };
 }
 
+// Known analytics/click-tracking query params, stripped by the "Clean" action
+// while functional params (?id=, ?q=, ?page=) are kept. Matched case-insensitively.
+const TRACKING_PARAMS = new Set([
+  // Google / Ads click IDs
+  "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "gad_source",
+  // Microsoft / Bing
+  "msclkid",
+  // Meta / Instagram
+  "fbclid", "igshid", "igsh",
+  // X / Twitter, Yandex, TikTok
+  "twclid", "yclid", "ttclid",
+  // Mailchimp, HubSpot, Marketo, Vero, Klaviyo
+  "mc_cid", "mc_eid", "_hsenc", "_hsmi", "hsctatracking",
+  "mkt_tok", "vero_id", "vero_conv", "_kx",
+  // Alibaba, Adobe, Olytics, misc
+  "spm", "scm", "s_cid", "icid", "oly_anon_id", "oly_enc_id",
+]);
+
+// Param families where every member is a tracker (utm_*, Matomo/Piwik *_*).
+const TRACKING_PREFIXES = ["utm_", "pk_", "piwik_", "matomo_"];
+
+function isTrackingParam(key: string): boolean {
+  const k = key.toLowerCase();
+  return TRACKING_PARAMS.has(k) || TRACKING_PREFIXES.some(p => k.startsWith(p));
+}
+
 function detectUrl(trimmed: string): Detection | null {
   if (!URL_RE.test(trimmed) && !WWW_RE.test(trimmed)) return null;
   const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   let stripped = normalized;
+  let cleaned = normalized;
   let host = normalized;
+  let hasTracking = false;
   try {
     const u = new URL(normalized);
     host = u.hostname.replace(/^www\./, "");
+
+    // "Clean" — drop only known tracking params, keep functional ones and the
+    // hash. A separate parse so the "No params" wipe below can't interfere.
+    const clean = new URL(normalized);
+    for (const key of [...clean.searchParams.keys()]) {
+      if (isTrackingParam(key)) { clean.searchParams.delete(key); hasTracking = true; }
+    }
+    cleaned = clean.toString().replace(/\/$/, "");
+
+    // "No params" — drop the entire query + hash.
     u.search = "";
     u.hash = "";
     stripped = u.toString().replace(/\/$/, "");
   } catch { /* malformed — fall back to the raw string */ }
-  return {
-    kind: "url",
-    badge: "URL",
-    actions: [
-      { label: "Plain",      transform: () => trimmed },
-      { label: "Markdown",   transform: () => `[${host}](${normalized})` },
-      { label: "HTML <a>",   transform: () => `<a href="${normalized}">${host}</a>` },
-      { label: "No params",  transform: () => stripped },
-    ],
-  };
+
+  const actions: PasteAction[] = [
+    { label: "Plain",      transform: () => trimmed },
+    { label: "Markdown",   transform: () => `[${host}](${normalized})` },
+    { label: "HTML <a>",   transform: () => `<a href="${normalized}">${host}</a>` },
+  ];
+  // Only offer "Clean" when there's actually a tracker to remove, so it doesn't
+  // sit next to "No params" / Plain producing an identical result.
+  if (hasTracking) actions.push({ label: "Clean", transform: () => cleaned });
+  actions.push({ label: "No params", transform: () => stripped });
+
+  return { kind: "url", badge: "URL", actions };
 }
 
 function detectEmail(trimmed: string): Detection | null {

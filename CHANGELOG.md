@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Smart paste: "Clean" action for URLs.** Detected links now offer a *Clean*
+  paste that strips known analytics/click-tracking query params (`utm_*`,
+  `fbclid`, `gclid`, `igshid`, `msclkid`, Mailchimp/HubSpot/Matomo families,
+  and more) while keeping functional params (`?id=`, `?q=`) and the `#hash`.
+  It only appears when the link actually carries a tracker, so it never
+  duplicates the existing *No params* action.
+
 ## [v0.7.2] - 2026-06-12
 
 Emergency fix for v0.7.1 on macOS.
